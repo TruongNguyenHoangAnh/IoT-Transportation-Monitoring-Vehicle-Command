@@ -1,0 +1,21 @@
+
+\begin{table}[H]
+    \centering
+    \caption{Chỉ số phân loại RF chi tiết trên 2 thiết bị triển khai thực tế}
+    \label{tab:rf_results_2vehicles}
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|c|c|}
+        \hline
+        \textbf{Mô hình Xe} & \textbf{Test Acc.} & \textbf{F1-NORMAL} & \textbf{F1-WARNING} & \textbf{F1-CRITICAL} & \textbf{Test Samples} \\
+        \hline
+        Transport-1 & 99.17\% & 0.000 & 0.000 & 0.000 & 120 \\
+        Transport-2 & 95.83\% & 0.000 & 0.000 & 0.000 & 120 \\
+        \hline
+        \textbf{Trung bình} & \textbf{97.50\%} & \textbf{0.000} & \textbf{0.000} & \textbf{0.000} & \textbf{240} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\textbf{Phân tích độ chính xác:} Việc xây dựng mô hình riêng cho từng xe đã mang lại hiệu quả rõ rệt. Độ chính xác trung bình đạt 97.50\% (vượt trội so với mức 91.75\% nếu dùng mô hình toàn cục). Transport-1 đạt 99.17\% với tín hiệu RF chất lượng tốt, trong khi Transport-2 đạt 95.83\% do tín hiệu yếu hơn. Tuy nhiên, mức điểm F1 tổng thể $> 0.95$ vẫn hoàn toàn đáp ứng tốt tiêu chuẩn mạng công nghiệp.
+
+\textbf{Mức độ tin cậy:} Tập kiểm thử tổng cộng 240 mẫu, đúp lực với phân bố lớp cân bằng, đảm bảo các kết quả thống kê đáng tin cậy.

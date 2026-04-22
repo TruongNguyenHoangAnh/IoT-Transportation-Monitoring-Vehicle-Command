@@ -1,0 +1,709 @@
+{
+  "timestamp": "2026-04-16 20:00:43",
+  "port": "COM9",
+  "baud": 115200,
+  "samples_tested": 100,
+  "prediction_match_rate": 0.96,
+  "python_esp32_predictions": [
+    {
+      "index": 0,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 1,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 2,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 3,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 4,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 5,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 6,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 7,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 8,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 9,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 10,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 11,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 12,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 13,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "NORMAL",
+      "match": false
+    },
+    {
+      "index": 14,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 15,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 16,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 17,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 18,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 19,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "NORMAL",
+      "match": false
+    },
+    {
+      "index": 20,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 21,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 22,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 23,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 24,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 25,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 26,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 27,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 28,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 29,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 30,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 31,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 32,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 33,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 34,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 35,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 36,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 37,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 38,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 39,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 40,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 41,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 42,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 43,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 44,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 45,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 46,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "ANOMALY",
+      "match": false
+    },
+    {
+      "index": 47,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 48,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 49,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 50,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 51,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 52,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 53,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 54,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 55,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 56,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 57,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 58,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 59,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 60,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 61,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "ANOMALY",
+      "match": false
+    },
+    {
+      "index": 62,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 63,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 64,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 65,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 66,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 67,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 68,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 69,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 70,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 71,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 72,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 73,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 74,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 75,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 76,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 77,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 78,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 79,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 80,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 81,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 82,
+      "true_label": "ANOMALY",
+      "python_pred": "ANOMALY",
+      "esp32_pred": "ANOMALY",
+      "match": true
+    },
+    {
+      "index": 83,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 84,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 85,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 86,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 87,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 88,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 89,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 90,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 91,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 92,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 93,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 94,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 95,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 96,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 97,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 98,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    },
+    {
+      "index": 99,
+      "true_label": "NORMAL",
+      "python_pred": "NORMAL",
+      "esp32_pred": "NORMAL",
+      "match": true
+    }
+  ]
+}

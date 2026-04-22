@@ -1,0 +1,19 @@
+# Library Directory
+
+This directory is intended for project specific (private) libraries.
+PlatformIO will compile them to static libraries and link them into the program.
+
+The source code of each library should be placed in its own directory (e.g. lib/Firebase_ESP32/).
+
+For example, see a structure for an existing library:
+
+```
+lib/Firebase_ESP32/
+|-- src/
+|   |-- Firebase.h
+|   |-- Firebase.cpp
+|-- README
+```
+
+For more examples and a guide how to create your own library, read the article:
+https://docs.platformio.org/en/latest/lib/index.html#external-libraries

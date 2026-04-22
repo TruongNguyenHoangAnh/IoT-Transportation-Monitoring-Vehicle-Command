@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-04-17T16:16:00.029566",
+  "total_dataset_size": 3000,
+  "vehicles_analyzed": [
+    {
+      "vehicle_name": "Transport-1",
+      "test_samples": 120,
+      "accuracy": 0.9916666666666667,
+      "k": 5,
+      "class_metrics": {
