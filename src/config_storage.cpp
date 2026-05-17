@@ -58,7 +58,7 @@ void ConfigStorage::setDeviceID(const String& id) {
 }
 
 String ConfigStorage::getMqttServer() {
-    return gPrefs.getString("mqtt_server", "10.16.1.75");
+    return gPrefs.getString("mqtt_server", "10.93.80.75");
 }
 
 String ConfigStorage::getMqttPort() {

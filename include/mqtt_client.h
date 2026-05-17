@@ -23,9 +23,6 @@ void mqttLoop();
 
 void publishTelemetry(const TelemetryData& data);
 
-void publishAnomaly(const String& vehicle_id, const String& anomaly_type,
-                   float knn_score, float knn_threshold);
-
 void publishNodeStatus(const String& vehicle_id, uint32_t uptime_ms, int wifi_rssi,
                        int heap_free, int packet_count[2], int rejected_count[2], bool online);
 

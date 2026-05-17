@@ -168,8 +168,7 @@ JsonObject telemetryToJson(const TelemetryData& data, JsonDocument& doc) {
     root["light_level"] = data.light_level;
     root["tamper"] = data.tamper_flag;
     root["timestamp_ms"] = data.timestamp_ms;
-    root["knn_prediction"] = data.knn_prediction;
-    root["knn_reason"] = data.knn_reason;
+    root["anomaly_flag"] = data.anomaly_flag;
     
     JsonObject gateway = root.createNestedObject("gateway");
     gateway["rssi"] = data.rssi;
@@ -190,10 +189,7 @@ void debugPrintTelemetryData(const TelemetryData& data) {
     LOG_INFO("Light Level: %d", data.light_level);
     LOG_INFO("Tamper: %d", data.tamper_flag);
     LOG_INFO("Signal - RSSI: %d dBm, SNR: %d dB", data.rssi, data.snr);
-    LOG_INFO("KNN Outlier: %s (%s) (score=%.3f, threshold=%.3f)",
-             data.knn_prediction.c_str(), data.knn_reason.c_str(), data.knn_score, data.knn_threshold);
-    LOG_INFO("RF Anomaly: %s (score=%.3f, confidence=%.1f%%)",
-             data.rf_anomaly_state.c_str(), data.rf_anomaly_score, data.rf_anomaly_confidence);
+    LOG_INFO("Anomaly Flag: %d", data.anomaly_flag);
     LOG_INFO("Sequence: %d", data.sequence);
     LOG_INFO("Timestamp: %d ms", data.timestamp_ms);
     LOG_INFO("==========================");

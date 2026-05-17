@@ -1,6 +1,7 @@
 #ifndef WIFI_MANAGER_H
 #define WIFI_MANAGER_H
 
+#include <DNSServer.h>
 #include <WiFi.h>
 #include <String.h>
 #include <vector>
@@ -54,12 +55,16 @@ private:
     static uint32_t staStartTime;
     static uint32_t buttonPressTime;
     static bool buttonPressed;
+    static DNSServer dnsServer;
+    static bool dnsServerActive;
     
     static void onSTAConnected();
     static void onSTADisconnected();
     static void transitionToAP();
     static void transitionToSTA();
     static void transitionToRunning();
+    static void processCaptivePortal();
+    static void stopCaptivePortal();
 };
 
 #endif // WIFI_MANAGER_H

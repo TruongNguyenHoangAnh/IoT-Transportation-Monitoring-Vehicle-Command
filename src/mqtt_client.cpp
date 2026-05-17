@@ -3,7 +3,6 @@
 #include "crypto_utils.h"
 #include "wifi_manager.h"
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <SPIFFS.h>
@@ -13,12 +12,10 @@
 #include <unordered_map>
 
 WiFiClient plainClient;
-WiFiClientSecure secureClient;
 PubSubClient mqttClient(plainClient);
 
 uint16_t mqttEffectivePort = MQTT_PORT;
 bool mqttConnected = false;
-bool mqttUsingTls = MQTT_USE_TLS;
 
 uint32_t lastMQTTReconnectAttempt = 0;
 uint16_t mqttReconnectDelay = 5000; 
@@ -26,7 +23,7 @@ const uint16_t MAX_RECONNECT_DELAY = 60000;
 const uint16_t MIN_RECONNECT_DELAY = 1000;  
 uint32_t lastNoWiFiLogTime = 0;
 
-// Priority queue: anomaly > telemetry > status
+// Priority queue: telemetry > status
 enum MessagePriority { PRIORITY_LOW = 2, PRIORITY_MEDIUM = 1, PRIORITY_HIGH = 0 };
 struct PriorityMessage {
     OutgoingMessage msg;
@@ -86,12 +83,16 @@ void mqttMessageReceived(char* topic, byte* payload, unsigned int length) {
 void handleMqttConnected() {
     mqttConnected = true;
     LOG_MQTT("connected (PubSubClient)");
+    LOG_INFO("[MQTT] CONNECTED to %s:%d | WiFi IP: %s | RSSI: %d dBm",
+             MQTT_BROKER,
+             mqttEffectivePort,
+             WiFi.localIP().toString().c_str(),
+             WiFi.RSSI());
 
     mqttReconnectDelay = 5000;
     lastMQTTReconnectAttempt = 0;
 
     mqttClient.subscribe("vehicles/+/telemetry");
-    mqttClient.subscribe("vehicles/+/anomalies");
     mqttClient.subscribe("vehicles/+/status");
 
     flushPendingPublishes();
@@ -123,29 +124,16 @@ void connectToMqtt() {
     }
 
     if (!isMqttBrokerReachable()) {
-        if (mqttUsingTls && !MQTT_TLS_STRICT && mqttEffectivePort == 8883) {
-            LOG_WARN("MQTT TLS broker unreachable on 8883, falling back to plaintext 1883");
-            mqttUsingTls = false;
-            mqttEffectivePort = 1883;
-            mqttClient.setClient(plainClient);
-            mqttClient.setServer(MQTT_BROKER, mqttEffectivePort);
-            if (!isMqttBrokerReachable()) {
-                LOG_MQTT("plain broker also unreachable");
-                mqttConnected = false;
-                return;
-            }
-        } else {
-            LOG_MQTT("broker unreachable, will retry later");
-            mqttConnected = false;
-            return;
-        }
+        LOG_MQTT("broker unreachable, will retry later");
+        mqttConnected = false;
+        return;
     }
 
     if (mqttClient.connected()) {
         return;
     }
 
-    LOG_MQTT("attempt connect to MQTT %s:%d (TLS=%d)", MQTT_BROKER, mqttEffectivePort, mqttUsingTls);
+    LOG_MQTT("attempt connect to MQTT %s:%d", MQTT_BROKER, mqttEffectivePort);
 
     bool success;
     if (strlen(MQTT_USERNAME) > 0) {
@@ -177,9 +165,7 @@ void initMQTT() {
         LOG_WARN("SPIFFS mount failed");
     }
 
-    mqttUsingTls = false;
     mqttClient.setClient(plainClient);
-
     mqttEffectivePort = 1883;
 
     mqttClient.setServer(MQTT_BROKER, mqttEffectivePort);
@@ -305,7 +291,6 @@ bool canPublishMessageType(const String& vehicle_id, const String& msg_type) {
 }
 
 static MessagePriority getPriorityFromTopic(const String& topic) {
-    if (topic.indexOf("/anomalies") > 0) return PRIORITY_HIGH;
     if (topic.indexOf("/telemetry") > 0) return PRIORITY_MEDIUM;
     if (topic.indexOf("/status") > 0) return PRIORITY_LOW;
     return PRIORITY_MEDIUM;
@@ -466,10 +451,9 @@ void publishTelemetry(const TelemetryData& data) {
     doc["snr"] = data.snr;
     doc["latitude"] = data.gps_latitude;
     doc["longitude"] = data.gps_longitude;
-    doc["knn_prediction"] = data.knn_prediction;
-    doc["rf_anomaly_state"] = data.rf_anomaly_state;
-    doc["rf_anomaly_score"] = data.rf_anomaly_score;
-    doc["rf_anomaly_confidence"] = data.rf_anomaly_confidence;
+    doc["anomaly_flag"] = data.anomaly_flag;
+    doc["nn_anomaly_score"] = (int)round(data.nn_anomaly_score * 100.0f);
+    doc["nn_anomaly_state"] = data.nn_anomaly_state;
     
     // FIX: Calculate HMAC BEFORE adding hmac field to JSON
     String temp;
@@ -479,29 +463,6 @@ void publishTelemetry(const TelemetryData& data) {
     
     // Add HMAC field THEN serialize full payload
     // This ensures Python bridge calculates HMAC on same JSON structure
-    doc["hmac"] = signature;
-    String payload;
-    serializeJson(doc, payload);
-    publishWithRetry(topic, payload, 1, false);
-}
-
-void publishAnomaly(const String& vehicle_id, const String& anomaly_type, 
-                   float knn_score, float knn_threshold) {
-    if (!canPublishVehicle(vehicle_id)) return;
-    if (!canPublishMessageType(vehicle_id, "anomaly")) return;
-    String topic = String(MQTT_TOPIC_PREFIX) + "/" + vehicle_id + "/anomalies";
-    StaticJsonDocument<256> doc;
-    doc["vehicle_id"] = vehicle_id;
-    doc["anomaly_type"] = anomaly_type;
-    doc["knn_score"] = knn_score;
-    doc["knn_threshold"] = knn_threshold;
-    
-    // FIX: Calculate HMAC BEFORE adding hmac field
-    String temp;
-    serializeJson(doc, temp);
-    char signature[65];
-    hmacSha256(temp.c_str(), temp.length(), signature);
-    
     doc["hmac"] = signature;
     String payload;
     serializeJson(doc, payload);
@@ -539,19 +500,19 @@ void publishNodeStatus(const String& vehicle_id, uint32_t uptime_ms, int wifi_rs
 
 void publishGatewayGpsStatus(double gps_latitude, double gps_longitude) {
     String topic = String(MQTT_TOPIC_PREFIX) + "/command_vehicle/gps";
+
     StaticJsonDocument<128> doc;
-    doc["gps_latitude"] = gps_latitude;
-    doc["gps_longitude"] = gps_longitude;
+    doc["latitude"] = gps_latitude;
+    doc["longitude"] = gps_longitude;
 
     String payload;
     payload.reserve(128);
     serializeJson(doc, payload);
 
     bool success = publishWithRetry(topic, payload, 1, false);
+
     if (success) {
-        Serial.printf("[MQTT-COMMAND] Published command vehicle GPS lat=%.6f lon=%.6f\n", gps_latitude, gps_longitude);
-    } else {
-        Serial.printf("[MQTT-COMMAND] ENQUEUED command vehicle GPS (connected=%d)\n", mqttClient.connected());
+        Serial.printf("[MQTT-COMMAND] GPS lat=%.6f lon=%.6f\n", gps_latitude, gps_longitude);
     }
 }
 

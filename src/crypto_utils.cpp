@@ -94,4 +94,3 @@ bool decryptPayload(RXPacket& rxPacket) {
     rxPacket.payload = String((char*)dec_buf);
     return true;
 }
-

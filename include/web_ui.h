@@ -16,49 +16,44 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
         
         body {
-            background: #0b0f14;
-            color: #00ff9c;
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-            line-height: 1.6;
+            background:
+                radial-gradient(circle at top left, rgba(43,108,176,0.10), transparent 28%),
+                linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+            color: #2c3e50;
+            font-family: 'Segoe UI', sans-serif;
             padding: 20px;
-            min-height: 100vh;
         }
         
         .container {
-            max-width: 600px;
+            max-width: 480px; /* nhỏ lại */
             margin: 0 auto;
-            border: 2px solid #00ff9c;
-            background: #0d1117;
-            padding: 30px;
-            box-shadow: 0 0 20px rgba(0, 255, 156, 0.3);
+            border-radius: 12px;
+            background: #ffffff;
+            padding: 25px;
+            box-shadow: 0 10px 28px rgba(43,108,176,0.10), 0 2px 8px rgba(0,0,0,0.06);
+            border: 1px solid #dcdcdc;
         }
         
         .header {
             text-align: center;
-            border-bottom: 2px solid #00ff9c;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
+            margin-bottom: 20px;
         }
         
         .header h1 {
-            font-size: 24px;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            margin-bottom: 5px;
+            font-size: 13px;
+            color: #6c757d;
         }
         
         .header p {
             font-size: 13px;
-            color: #00cc7a;
-            letter-spacing: 1px;
+            color: #6c757d;
         }
         
         .device-info {
             margin-bottom: 25px;
-            padding: 15px;
-            background: #161b22;
-            border: 1px solid #00ff9c;
+            padding: 12px;
+            background: #e6fffa;
+            border-radius: 8px;
             text-align: center;
         }
         
@@ -68,7 +63,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
         
         .device-id {
-            color: #ffaa00;
+            color: #2b6cb0;
             font-weight: bold;
             margin-top: 5px;
         }
@@ -81,18 +76,18 @@ const char index_html[] PROGMEM = R"rawliteral(
             font-size: 14px;
             letter-spacing: 1px;
             text-transform: uppercase;
-            color: #00ff9c;
+            color: #2b6cb0;
             margin-bottom: 15px;
             padding-bottom: 10px;
-            border-bottom: 1px solid #00ff9c;
+            border-bottom: 1px solid #cbd5e0;
         }
         
         .scan-button {
             width: 100%;
             padding: 12px 20px;
-            background: #0b0f14;
-            border: 1px solid #00ff9c;
-            color: #00ff9c;
+            background: #ffffff;
+            border: 1px solid #2b6cb0;
+            color: #2b6cb0;
             font-family: 'Courier New', monospace;
             font-size: 16px;
             cursor: pointer;
@@ -100,12 +95,12 @@ const char index_html[] PROGMEM = R"rawliteral(
             text-transform: uppercase;
             letter-spacing: 1px;
             transition: all 0.3s;
+            border-radius: 6px;
         }
         
         .scan-button:hover {
-            background: #00ff9c;
-            color: #0b0f14;
-            box-shadow: 0 0 10px rgba(0, 255, 156, 0.5);
+            background: #2b6cb0;
+            color: #ffffff;
         }
         
         .scan-button:active {
@@ -116,14 +111,14 @@ const char index_html[] PROGMEM = R"rawliteral(
             max-height: 200px;
             overflow-y: auto;
             margin-bottom: 15px;
-            border: 1px solid #00ff9c;
-            background: #0d1117;
+            border: 1px solid #e0e0e0;
+            background: #ffffff;
             padding: 0;
         }
         
         .network-item {
             padding: 12px 15px;
-            border-bottom: 1px solid #00ff9c;
+            border-bottom: 1px solid #eee;
             cursor: pointer;
             transition: all 0.2s;
             display: flex;
@@ -136,13 +131,15 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
         
         .network-item:hover {
-            background: #161b22;
-            color: #ffff00;
+            background: #f0f8ff;
+            color: #2c3e50;
         }
         
         .network-item.selected {
-            background: #1a4d2e;
-            color: #00ff9c;
+            background: linear-gradient(90deg, #cfe3ff 0%, #9ec5ff 100%);
+            color: #2c3e50;
+            border-left: 4px solid #2b6cb0;
+            padding-left: 11px;
         }
         
         .network-name {
@@ -152,13 +149,13 @@ const char index_html[] PROGMEM = R"rawliteral(
         
         .network-signal {
             font-size: 12px;
-            color: #00cc7a;
+            color: #4a5568;
             margin-right: 10px;
         }
         
         .network-security {
             font-size: 11px;
-            color: #ffaa00;
+            color: #e53e3e;
             min-width: 30px;
             text-align: right;
         }
@@ -173,34 +170,35 @@ const char index_html[] PROGMEM = R"rawliteral(
             text-transform: uppercase;
             letter-spacing: 1px;
             margin-bottom: 8px;
-            color: #00ff9c;
+            color: #4a5568;
         }
         
         .form-input, .form-select {
             width: 100%;
             padding: 12px 15px;
-            background: #161b22;
-            border: 1px solid #00ff9c;
-            color: #00ff9c;
-            font-family: 'Courier New', monospace;
+            background: #ffffff;
+            border: 1px solid #cbd5e0;
+            color: #2c3e50;
             font-size: 14px;
             transition: all 0.3s;
+            border-radius: 6px;
         }
         
         .form-input:focus, .form-select:focus {
             outline: none;
-            box-shadow: 0 0 10px rgba(0, 255, 156, 0.5);
-            background: #0b0f14;
+            box-shadow: 0 0 5px rgba(43,108,176,0.3);
+            background: #ffffff;
+            border-color: #2b6cb0;
         }
         
         .form-input::placeholder {
-            color: #00cc7a;
+            color: #718096;
             opacity: 0.7;
         }
         
         .form-select option {
-            background: #0b0f14;
-            color: #00ff9c;
+            background: #ffffff;
+            color: #2c3e50;
         }
         
         .form-buttons {
@@ -212,21 +210,21 @@ const char index_html[] PROGMEM = R"rawliteral(
         .btn {
             flex: 1;
             padding: 14px 20px;
-            border: 1px solid #00ff9c;
-            background: #0b0f14;
-            color: #00ff9c;
-            font-family: 'Courier New', monospace;
+            border: 1px solid #2b6cb0;
+            background: #ffffff;
+            color: #2b6cb0;
             font-size: 16px;
             text-transform: uppercase;
             letter-spacing: 1px;
             cursor: pointer;
             transition: all 0.3s;
+            border-radius: 6px;
         }
         
         .btn:hover:not(:disabled) {
-            background: #00ff9c;
-            color: #0b0f14;
-            box-shadow: 0 0 15px rgba(0, 255, 156, 0.5);
+            background: #2b6cb0;
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(43,108,176,0.3);
         }
         
         .btn:active:not(:disabled) {
@@ -239,13 +237,14 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
         
         .btn-primary {
-            background: #1a4d2e;
-            border-color: #00ff9c;
+            background: #2b6cb0;
+            border: none;
+            color: #ffffff;
         }
         
         .btn-primary:hover:not(:disabled) {
-            background: #00ff9c;
-            color: #0b0f14;
+            background: #1e4e8c;
+            color: #ffffff;
         }
         
         .status-section {
@@ -256,28 +255,28 @@ const char index_html[] PROGMEM = R"rawliteral(
         
         .status-display {
             padding: 15px;
-            background: #161b22;
-            border: 1px solid #00ff9c;
+            background: #f8fafc;
+            border: 1px solid #cbd5e0;
             text-align: center;
             font-size: 14px;
         }
         
         .status-idle {
-            color: #00ff9c;
+            color: #2b6cb0;
         }
         
         .status-scanning {
-            color: #ffaa00;
+            color: #d69e2e;
             animation: blink 1s infinite;
         }
         
         .status-configuring {
-            color: #ff6688;
+            color: #e53e3e;
             animation: blink 0.5s infinite;
         }
         
         .status-success {
-            color: #00ff9c;
+            color: #38a169;
         }
         
         @keyframes blink {
@@ -293,7 +292,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             display: inline-block;
             width: 12px;
             height: 12px;
-            border: 2px solid #00ff9c;
+            border: 2px solid #2b6cb0;
             border-top: 2px solid transparent;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
@@ -305,9 +304,9 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
         
         .error-message {
-            color: #ff6688;
-            background: #3a1a1a;
-            border: 1px solid #ff6688;
+            color: #c53030;
+            background: #fff5f5;
+            border: 1px solid #feb2b2;
             padding: 12px;
             margin-bottom: 15px;
             display: none;
@@ -340,7 +339,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         <div class="section">
             <div class="section-title">AVAILABLE NETWORKS</div>
             <button class="scan-button" id="scanBtn">SCAN WIRELESS</button>
-            <button class="scan-button" id="resetBtn" style="background: #8b0000; border-color: #ff6b6b; color: #ff6b6b;">RESET WiFi</button>
+            <button class="scan-button" id="resetBtn" style="background: #fff5f5; border-color: #f6adad; color: #c53030;">RESET WiFi</button>
             <div class="networks-list" id="networksList">
                 <div class="network-item" style="justify-content: center; color: #00cc7a;">
                     Click SCAN to find networks...
@@ -425,16 +424,16 @@ const char index_html[] PROGMEM = R"rawliteral(
             }
             
             networksList.innerHTML = networks.map(net => {
-                // Signal strength icon based on RSSI
-                let signalIcon = '📶';
-                if (net.rssi > -50) signalIcon = '📶📶📶📶';      // Strong
-                else if (net.rssi > -70) signalIcon = '📶📶📶';   // Good
-                else if (net.rssi > -80) signalIcon = '📶📶';     // Weak
-                else signalIcon = '📶';                             // Very Weak
+                // Signal strength label based on RSSI
+                let signalLabel = 'L';
+                if (net.rssi > -50) signalLabel = 'Strong';     
+                else if (net.rssi > -70) signalLabel = 'Good';  
+                else if (net.rssi > -80) signalLabel = 'Weak';   
+                else signalLabel = 'Low';                       
                 
                 return `
                     <div class="network-item" onclick="selectNetwork('${net.ssid.replace(/'/g, "\\'")}')">
-                        <span style="flex: 0 0 60px;">${signalIcon}</span>
+                        <span style="flex: 0 0 60px; font-weight: bold; color: #2b6cb0;">${signalLabel}</span>
                         <span class="network-name" style="flex: 1;">${net.ssid}</span>
                         <span class="network-signal">${net.rssi}dBm</span>
                         <span class="network-security">${net.secure ? '🔒' : '🔓'}</span>
@@ -504,9 +503,9 @@ const char index_html[] PROGMEM = R"rawliteral(
                     // Show message
                     errorMsg.textContent = 'Configuration saved. ESP32 restarting...';
                     errorMsg.className = 'error-message show';
-                    errorMsg.style.borderColor = '#00ff9c';
-                    errorMsg.style.background = '#1a4d2e';
-                    errorMsg.style.color = '#00ff9c';
+                    errorMsg.style.borderColor = '#9ae6b4';
+                    errorMsg.style.background = '#f0fff4';
+                    errorMsg.style.color = '#2f855a';
                     
                     // Auto redirect after 5 seconds
                     setTimeout(() => {
@@ -547,9 +546,9 @@ const char index_html[] PROGMEM = R"rawliteral(
                 statusDisplay.textContent = 'DEVICE REBOOTING';
                 errorMsg.textContent = 'WiFi config cleared. Device restarting to AP mode...';
                 errorMsg.className = 'error-message show';
-                errorMsg.style.borderColor = '#ffaa00';
-                errorMsg.style.background = '#4d3300';
-                errorMsg.style.color = '#ffaa00';
+                errorMsg.style.borderColor = '#fed7aa';
+                errorMsg.style.background = '#fffaf0';
+                errorMsg.style.color = '#b7791f';
                 
                 // Auto redirect after 8 seconds
                 setTimeout(() => {

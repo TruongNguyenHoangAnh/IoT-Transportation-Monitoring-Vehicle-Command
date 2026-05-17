@@ -1,16 +1,11 @@
 ﻿#!/usr/bin/env python3
-"""
-MQTT to Cloud Firestore Bridge
-Production-grade: Minimal logging, queue-based, thread-safe batch operations
-"""
+
 import logging
 logging.basicConfig(level=logging.INFO)
 import os
 import uuid
 import json
 import time
-import hmac
-import hashlib
 import threading
 import signal
 from datetime import datetime
@@ -24,17 +19,14 @@ from google.api_core.exceptions import ServiceUnavailable, InternalServerError, 
 import google.api_core.client_options
 
 # ==================== CONFIG ====================
-MQTT_HOST = os.getenv("MQTT_HOST", "10.16.1.75")
+MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_USE_TLS = os.getenv("MQTT_USE_TLS", "false").lower() in ("1", "true", "yes", "on")
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 MQTT_TOPICS = [
     ("vehicles/+/telemetry", 1),
-    ("vehicles/+/anomalies", 1),
     ("vehicles/+/status", 1),
-    ("vehicles/+/gps", 1),
 ]
 
 # Firestore config
@@ -48,8 +40,8 @@ BATCH_COMMIT_TIMEOUT_SEC = 30
 QUOTA_ERROR_BACKOFF_MS = 60000
 FAILED_QUEUE_CACHE = "failed_firestore_queue.json"
 
-MIN_WRITE_INTERVAL_MS = 2000  # 2 giây
-TELEMETRY_INTERVAL_MS = 10000  # 10 giây
+MIN_WRITE_INTERVAL_MS = 2000  
+TELEMETRY_INTERVAL_MS = 10000  
 last_state_cache = {}
 
 # ==================== GLOBAL STATE ====================
@@ -57,48 +49,20 @@ mqtt_client = None
 firebase_db = None
 mqtt_connected = False
 
-# Queue for pending operations (FIX #6: No silent drops)
-pending_batch_ops = deque()  # No maxlen - check size explicitly
+pending_batch_ops = deque() 
 batch_lock = threading.Lock()
 last_batch_flush_ms = 0
 MAX_PENDING_OPS = 500
 
-# Active flush thread tracking
 active_flush_thread = None
 flush_thread_start_ms = 0
-FLUSH_THREAD_TIMEOUT_SEC = 120  # Must be > BATCH_COMMIT_TIMEOUT_SEC
+FLUSH_THREAD_TIMEOUT_SEC = 120  
 
-# Rate limit tracking (separated by purpose - FIX #2)
 last_quota_error_ms = 0
-last_anomaly_ms = {}              # Anomaly-specific rate limit (ms)
-last_telemetry_global_ms = {}    # Telemetry-specific rate limit (ms)
+last_anomaly_ms = {}             
+last_telemetry_global_ms = {}   
 
 # ==================== LOGGING ====================
-
-def verify_hmac(payload_dict, provided_hmac):
-    """Verify HMAC signature - match ESP32 insertion order (NO sorted keys)"""
-    payload_copy = {k: v for k, v in payload_dict.items() if k != "hmac"}
-    # IMPORTANT: Don't sort keys - ESP32 uses insertion order
-    payload_str = json.dumps(payload_copy)
-    expected_hmac = hmac.new(
-        b"bridge-secret",
-        payload_str.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    is_valid = hmac.compare_digest(expected_hmac, provided_hmac or "")
-    
-    if not is_valid:
-        import sys
-        payload_bytes = payload_str.encode()
-        print(f"[DEBUG] === HMAC MISMATCH ===", file=sys.stderr)
-        print(f"[DEBUG] Full Payload: {payload_str}", file=sys.stderr)
-        print(f"[DEBUG] Payload Length: {len(payload_bytes)} bytes", file=sys.stderr)
-        print(f"[DEBUG] Payload Hex: {payload_bytes.hex()}", file=sys.stderr)
-        print(f"[DEBUG] Expected HMAC: {expected_hmac}", file=sys.stderr)
-        print(f"[DEBUG] Provided HMAC: {provided_hmac}", file=sys.stderr)
-    
-    return is_valid
 
 def log_info(msg):
     """Log important events only"""
@@ -153,17 +117,17 @@ def mqtt_on_disconnect(client, userdata, rc, properties=None):
 
 
 def mqtt_on_message(client, userdata, msg):
-    """Process incoming MQTT message - HMAC verification DISABLED"""
+    """Process incoming MQTT message"""
     
     try:
-        payload = json.loads(msg.payload.decode())
+        payload_str = msg.payload.decode(errors="replace")
+        log_info(f"MQTT received topic={msg.topic} payload={payload_str[:200]}")
+        payload = json.loads(payload_str)
         vehicle_id = extract_vehicle_id(msg.topic)
 
         if not vehicle_id:
+            log_error(f"Invalid topic format, cannot extract vehicle_id from {msg.topic}")
             return
-        
-        # Remove hmac field from payload (don't store in Firestore)
-        payload.pop("hmac", None)
         
         queue_firestore_write(
             vehicle_id,
@@ -172,24 +136,22 @@ def mqtt_on_message(client, userdata, msg):
         )
 
     except json.JSONDecodeError:
-        log_error(f"Invalid JSON from {msg.topic}")
+        log_error(f"Invalid JSON from {msg.topic}: {payload_str[:80]}")
     except Exception as e:
         log_error(f"Message error: {e}")
 
 def extract_vehicle_id(topic):
-    """Extract vehicle_id from topic: vehicles/Transport-1/telemetry (FIX #4: Guard edge cases)"""
     if not topic:
         return None
     parts = topic.split('/')
-    if len(parts) < 3:  # Should have: vehicles/VEHICLE_ID/TYPE
+    if len(parts) < 3: 
         return None
     vehicle_id = parts[1]
-    if not vehicle_id:  # Handle vehicles//telemetry
+    if not vehicle_id: 
         return None
     return vehicle_id
 
 def init_mqtt():
-    """Initialize MQTT client"""
     global mqtt_client
     
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"Firestore-Bridge-{uuid.uuid4().hex[:6]}")
@@ -203,18 +165,15 @@ def init_mqtt():
     if MQTT_USERNAME and MQTT_PASSWORD:
         mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     
-    # Force MQTT v3.1.1 to avoid protocol mismatch with older brokers
     mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=120)
     mqtt_client.loop_start()
-    log_info(f"MQTT client started (broker={MQTT_HOST}:{MQTT_PORT}, TLS={MQTT_USE_TLS})")
+    log_info(f"MQTT client started (broker={MQTT_HOST}:{MQTT_PORT})")
 
 def mqtt_loop():
-    """MQTT background loop (handled by mqtt.loop_start())"""
     pass
 
 # ==================== FIRESTORE ====================
 def init_firestore():
-    """Initialize Firebase connection"""
     global firebase_db
 
     try:
@@ -246,23 +205,20 @@ def normalize_telemetry(vehicle_id, payload):
         "tamper": payload.get("tamper_flag", 0),
         "gateway_rssi": payload.get("rssi", 0),
         "gateway_snr": payload.get("snr", 0),
-        "knn_prediction": payload.get("knn_prediction", "NORMAL"),
-        "rf_anomaly_state": payload.get("rf_anomaly_state", "NORMAL"),
+        "anomaly_flag": payload.get("anomaly_flag", 0),
         "timestamp_ms": payload.get("timestamp", 0),
         "last_updated": firestore.SERVER_TIMESTAMP,
     }
     
     lat = payload.get("latitude", 0)
     lng = payload.get("longitude", 0)
-    if lat != 0 and lng != 0:
-        doc["gps"] = firestore.GeoPoint(lat, lng)
-        doc["gps_source"] = "telemetry"
+    doc["gps"] = firestore.GeoPoint(lat, lng)
+    doc["gps_source"] = "telemetry"
     
     return doc
 
 
 def queue_firestore_write(vehicle_id, payload, topic):
-    """FIX #1, #2, #3: Unified ms-based rate limiting, separated trackers"""
     global last_anomaly_ms, last_telemetry_global_ms, last_state_cache
 
     now_ms = int(time.time() * 1000)
@@ -270,22 +226,7 @@ def queue_firestore_write(vehicle_id, payload, topic):
     merge = False
     ref = None
 
-    # ===============================
-    # ANOMALY: 1s rate limit per vehicle
-    # ===============================
-    if "/anomalies" in topic:
-        last = last_anomaly_ms.get(vehicle_id, 0)
-        if now_ms - last < 1000:  # 1s per vehicle
-            return
-        last_anomaly_ms[vehicle_id] = now_ms
-        data = payload
-        merge = False
-        ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id)
-
-    # ===============================
-    # STATUS: store in subcollection
-    # ===============================
-    elif "/status" in topic:
+    if "/status" in topic:
         last_state = last_state_cache.get(vehicle_id)
         if last_state == payload:
             return
@@ -295,9 +236,6 @@ def queue_firestore_write(vehicle_id, payload, topic):
         # Create new document in status subcollection with auto-generated ID
         ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("status").document()
 
-    # ===============================
-    # TELEMETRY: 10s per vehicle + 2s global
-    # ===============================
     elif "/telemetry" in topic:
         last_vehicle = last_telemetry_global_ms.get(vehicle_id, 0)
         if now_ms - last_vehicle < TELEMETRY_INTERVAL_MS:  # 10s per vehicle
@@ -306,22 +244,44 @@ def queue_firestore_write(vehicle_id, payload, topic):
         data = normalize_telemetry(vehicle_id, payload)
         merge = True
         ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id)
-
+        
+        # AUTO-CREATE STATUS from telemetry every 30s
+        if now_ms - last_telemetry_global_ms.get(vehicle_id + "_status_auto", 0) >= 30000:
+            last_telemetry_global_ms[vehicle_id + "_status_auto"] = now_ms
+            status_data = {
+                "vehicle_id": vehicle_id,
+                "online": True,
+                "packet_count": payload.get("packet_count", 0),
+                "packet_count_total": payload.get("packet_count_total", 0),
+                "rejected_count": payload.get("rejected_count", 0),
+                "rejected_count_total": payload.get("rejected_count_total", 0),
+                "wifi_rssi": payload.get("wifi_rssi", 0),
+                "heap_free": payload.get("heap_free", 0),
+                "uptime_ms": payload.get("uptime_ms", 0),
+                "timestamp_ms": payload.get("timestamp_ms", int(time.time() * 1000)),
+                "anomaly_flag": payload.get("anomaly_flag", 0),
+                "last_updated": firestore.SERVER_TIMESTAMP
+            }
+            try:
+                # Create status document in subcollection with auto-generated ID
+                status_ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("status").document()
+                status_ref.set(status_data)
+                
+                # AUTO-UPDATE /status/lastest for quick latest access
+                lastest_status_ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("status").document("lastest")
+                lastest_status_ref.set(status_data)
+            except Exception as e:
+                print(f"[ERROR] Auto-create status failed for {vehicle_id}: {e}")
+        
     else:
         data = payload
         merge = False
         ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id)
     
     if data is None or ref is None:
+        log_error(f"Cannot queue Firestore write for topic={topic}")
         return
-    
-    # Remove hmac field if present
-    if isinstance(data, dict):
-        data.pop("hmac", None)
 
-    # ===============================
-    # PUSH TO QUEUE (FIX #6: Guard against silent drops)
-    # ===============================
     with batch_lock:
         if len(pending_batch_ops) >= MAX_PENDING_OPS:
             log_error(f"Queue overflow: {len(pending_batch_ops)} ops pending")
@@ -332,12 +292,12 @@ def queue_firestore_write(vehicle_id, payload, topic):
             "data": data,
             "merge": merge
         })
+        log_info(f"Queued Firestore op: vehicle_id={vehicle_id} topic={topic} pending_ops={len(pending_batch_ops)}")
 
         if len(pending_batch_ops) >= BATCH_MAX_OPS:
             trigger_async_flush()
 
 def trigger_async_flush():
-    """Spawn async flush thread if not already running (FIX #7: Remove dead code)"""
     global active_flush_thread, flush_thread_start_ms
     
     now_ms = int(time.time() * 1000)
@@ -360,12 +320,10 @@ def trigger_async_flush():
     active_flush_thread.start()
 
 def flush_batch_writes():
-    """Commit pending batch operations to Firestore"""
     global last_batch_flush_ms, last_quota_error_ms
 
     now_ms = int(time.time() * 1000)
 
-    # Check quota backoff
     if last_quota_error_ms and now_ms - last_quota_error_ms < QUOTA_ERROR_BACKOFF_MS:
         return
 
@@ -389,7 +347,6 @@ def flush_batch_writes():
         return ops_count
 
     except DeadlineExceeded:
-        """FIX #5: Correct exception type for Firestore timeout"""
         log_error(f"Deadline exceeded, retrying {ops_count} ops")
         time.sleep(2)
         with batch_lock:
@@ -397,7 +354,6 @@ def flush_batch_writes():
         return 0
 
     except ServiceUnavailable:
-        """FIX #5: Handle service unavailable"""
         log_error(f"Service unavailable, retrying {ops_count} ops")
         time.sleep(2)
         with batch_lock:
@@ -418,12 +374,9 @@ def flush_batch_writes():
         return 0
 
 def cache_failed_ops(ops):
-    """Cache failed operations for retry (FIX #10: NO string conversion of data)"""
     try:
         cache = []
         for op in ops:
-            # Store data directly - do NOT convert to string
-            # GeoPoint and other types will fail json.dump without proper handling
             cache_item = {
                 "path": op["ref"].path,
                 "data": op["data"],  # Keep as dict, will auto-convert
@@ -432,11 +385,8 @@ def cache_failed_ops(ops):
             cache.append(cache_item)
         
         with open(FAILED_QUEUE_CACHE, "w") as f:
-            # Do NOT use default=str - let JSON encoder handle built-in types
-            # GeoPoint will be converted by json.dumps' default handler only if needed
             json.dump(cache, f)
     except TypeError as e:
-        # If GeoPoint can't be serialized, convert it explicitly
         try:
             cache = []
             for op in ops:
@@ -455,7 +405,6 @@ def cache_failed_ops(ops):
         log_error(f"Cache error: {e}")
 
 def load_failed_ops():
-    """Load and replay cached failed operations (FIX #4: Prevent double insert)"""
 
     if not os.path.exists(FAILED_QUEUE_CACHE):
         return 0
@@ -479,13 +428,11 @@ def load_failed_ops():
 
         replayed = 0
 
-        # replay max 2 ops per cycle
         for item in cache[:2]:
             try:
                 ref = firebase_db.document(item["path"])
                 data = item.get("data")
                 
-                # Type guard: ensure data is dict, not string (FIX #2)
                 if isinstance(data, str):
                     try:
                         data = json.loads(data)
@@ -508,7 +455,6 @@ def load_failed_ops():
 
                 with batch_lock:
                     if len(pending_batch_ops) < MAX_PENDING_OPS:
-                        # FIX #4: Check for duplicates before adding
                         is_duplicate = any(
                             op["ref"].path == ref.path and op["data"] == data
                             for op in pending_batch_ops
@@ -528,7 +474,6 @@ def load_failed_ops():
             except Exception as e:
                 log_error(f"Replay error: {e}")
 
-        # Update cache file with remaining items
         remaining = cache[replayed:]
 
         if remaining:

@@ -46,7 +46,7 @@ constexpr uint32_t FEATURE_WINDOW_MS = 5000;
 constexpr uint32_t FEATURE_LOG_INTERVAL_MS = 5000;
 constexpr uint32_t GATEWAY_GPS_STATUS_INTERVAL = 5000;
 
-#define MQTT_BROKER "10.16.1.75"
+#define MQTT_BROKER "10.77.190.75"
 #define MQTT_PORT 1883               
 #define MQTT_CLIENT_ID "ESP32_RX_Gateway"
 #define MQTT_TOPIC_PREFIX "vehicles"
@@ -58,7 +58,7 @@ constexpr uint32_t GATEWAY_GPS_STATUS_INTERVAL = 5000;
 #define MQTT_TLS_STRICT false
 
 // HMAC authentication for payload integrity (Transport nodes to RX gateway)
-#define HMAC_SECRET "your_hmac_secret_here"
+#define HMAC_SECRET "datn_252_secret_key"
 
 #define DEBUG_SERIAL 0        // Disable detailed UART logs
 #define DEBUG_JSON_PARSE 0    // Disable JSON parse logs (only show errors)

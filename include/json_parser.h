@@ -19,19 +19,17 @@ struct TelemetryData {
     int16_t rssi;               // Signal strength
     int8_t snr;                 // Signal-to-noise ratio
     uint32_t sequence;          // Packet sequence number
-    String knn_prediction;       // NORMAL or ANOMALY from KNN outlier model
-    String knn_reason;           // Feature reason: T/H/AG or NONE
-    float knn_score;             // KNN anomaly score
-    float knn_threshold;         // KNN threshold
-    String rf_anomaly_state;     // NORMAL, WARNING, CRITICAL
-    float rf_anomaly_score;      // Distance to 9th nearest neighbor
-    float rf_anomaly_confidence; // Voting confidence percentage
+    uint8_t anomaly_flag;        // 0=NORMAL, 1=ANOMALY from hybrid ML decision
+    float fused_anomaly_score;
+    /* TinyML Neural Network Anomaly Detection */
+    float nn_anomaly_score;      // Neural network probability [0.0-1.0]
+    String nn_anomaly_state;     // NORMAL or ANOMALY
     
     TelemetryData() : temperature(0), humidity(0), accel_magnitude(0),
                       gps_latitude(0), gps_longitude(0), light_level(0),
                       tamper_flag(0), timestamp_ms(0), rssi(0), snr(0),
-                      sequence(0), knn_prediction("UNKNOWN"), knn_reason("NONE"), knn_score(0), knn_threshold(0),
-                      rf_anomaly_state("NORMAL"), rf_anomaly_score(0), rf_anomaly_confidence(0) {}
+                      sequence(0), anomaly_flag(0),
+                      nn_anomaly_score(0), nn_anomaly_state("NORMAL") {}
 };
 
 bool parseJSONPayload(const String& payload, TelemetryData& data);

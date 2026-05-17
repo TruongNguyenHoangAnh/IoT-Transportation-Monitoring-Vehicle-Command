@@ -3,9 +3,6 @@
 
 #include <Arduino.h>
 
-/**
- * Vehicle statistics structure for tracking packet counts
- */
 struct VehicleStats {
     int packetCount = 0;
     int totalCount = 0;
@@ -13,16 +10,23 @@ struct VehicleStats {
     uint32_t lastTelemetry = 0;
 };
 
-/**
- * Publish node status ping with packet counts and connection info
- * Throttled to NODE_STATUS_INTERVAL
- */
-void publishNodeStatusPing();
+#define MAX_VEHICLES 4
 
-/**
- * Publish gateway GPS status if GPS fix is available
- * Throttled to GATEWAY_GPS_STATUS_INTERVAL
- */
+struct VehicleStatsFixed {
+    VehicleStats stats[MAX_VEHICLES];  
+    
+    VehicleStats& getStats(int node_id) {
+        if (node_id < 0 || node_id >= MAX_VEHICLES) {
+            return stats[0];  
+        }
+        return stats[node_id];
+    }
+};
+
+// External declaration of global vehicle stats
+extern VehicleStatsFixed gVehicleStats;
+
+void publishNodeStatusPing();
 void publishGatewayGpsStatusIfNeeded();
 
 #endif
