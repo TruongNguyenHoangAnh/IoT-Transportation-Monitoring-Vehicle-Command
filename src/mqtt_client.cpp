@@ -50,8 +50,8 @@ const size_t QUEUE_PRESSURE_THRESHOLD = 150;
 const size_t QUEUE_CRITICAL_THRESHOLD = 190;
 
 // Multi-layer rate limiting
-const uint32_t VEHICLE_MIN_INTERVAL_MS = 1000;
-const uint32_t TYPE_MIN_INTERVAL_MS = 200;
+const uint32_t VEHICLE_MIN_INTERVAL_MS = 500;  // Reduced from 1000 to allow more frequent updates
+const uint32_t TYPE_MIN_INTERVAL_MS = 100;      // Reduced from 200 for finer granularity
 
 bool publishRateManualOverride = false;
 uint32_t custom_min_publish_interval_ms = VEHICLE_MIN_INTERVAL_MS;
@@ -76,7 +76,7 @@ const char *MQTT_QUEUE_FILE = "/mqtt_pub_queue.json";
 
 
 void mqttMessageReceived(char* topic, byte* payload, unsigned int length) {
-    Serial.printf("[MQTT] Received message on topic %s (len=%u), ignored\n", topic, length);
+    // Removed spam log - messages are handled by bridge, not needed here
 }
 
 
@@ -378,7 +378,8 @@ void flushPendingPublishes() {
             bool found_lower = false;
             while (!pendingPublishQueue.empty() && !found_lower) {
                 PriorityMessage candidate = pendingPublishQueue.top();
-                if (candidate.priority < PRIORITY_HIGH) {
+                // BUG FIX #2: Compare correctly (HIGH=0, MEDIUM=1, LOW=2) → higher number = lower priority
+                if (candidate.priority > PRIORITY_HIGH) {  // ✅ FIXED: Was < (always false), now > (true for MEDIUM/LOW)
                     pm = candidate;
                     pendingPublishQueue.pop();
                     found_lower = true;
@@ -452,8 +453,8 @@ void publishTelemetry(const TelemetryData& data) {
     doc["latitude"] = data.gps_latitude;
     doc["longitude"] = data.gps_longitude;
     doc["anomaly_flag"] = data.anomaly_flag;
-    doc["nn_anomaly_score"] = (int)round(data.nn_anomaly_score * 100.0f);
-    doc["nn_anomaly_state"] = data.nn_anomaly_state;
+    // doc["nn_anomaly_score"] = (int)round(data.nn_anomaly_score * 100.0f);
+    // doc["nn_anomaly_state"] = data.nn_anomaly_state;
     
     // FIX: Calculate HMAC BEFORE adding hmac field to JSON
     String temp;
@@ -471,8 +472,7 @@ void publishTelemetry(const TelemetryData& data) {
 
 void publishNodeStatus(const String& vehicle_id, uint32_t uptime_ms, int wifi_rssi,
                        int heap_free, int packet_count[2], int rejected_count[2], bool online) {
-    if (!canPublishVehicle(vehicle_id)) return;
-    if (!canPublishMessageType(vehicle_id, "status")) return;
+    if (!canPublishMessageType(vehicle_id, "status")) return; 
     String topic = String(MQTT_TOPIC_PREFIX) + "/" + vehicle_id + "/status";
     StaticJsonDocument<256> doc;
     doc["vehicle_id"] = vehicle_id;
@@ -486,7 +486,6 @@ void publishNodeStatus(const String& vehicle_id, uint32_t uptime_ms, int wifi_rs
     doc["online"] = online;
     doc["timestamp_ms"] = millis();
     
-    // FIX: Calculate HMAC BEFORE adding hmac field
     String temp;
     serializeJson(doc, temp);
     char signature[65];

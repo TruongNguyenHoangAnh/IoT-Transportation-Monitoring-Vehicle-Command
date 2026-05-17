@@ -40,7 +40,7 @@
 
 // TIMING CONSTANTS
 #define WIFI_CHECK_INTERVAL 10000
-constexpr uint32_t NODE_STATUS_INTERVAL = 60000;
+constexpr uint32_t NODE_STATUS_INTERVAL = 10000;     // Reduced from 60000ms to 10s for frequent status updates
 constexpr uint32_t VEHICLE_OFFLINE_TIMEOUT_MS = 120000;
 constexpr uint32_t FEATURE_WINDOW_MS = 5000;
 constexpr uint32_t FEATURE_LOG_INTERVAL_MS = 5000;

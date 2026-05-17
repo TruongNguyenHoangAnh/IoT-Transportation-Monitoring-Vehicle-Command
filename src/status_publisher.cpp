@@ -32,12 +32,13 @@ void publishNodeStatusPing() {
 
         VehicleStats& stats = gVehicleStats.getStats(node_id);
         
-        // Skip if no telemetry received yet
-        if (stats.lastTelemetry == 0) {
-            continue;
+        // Skip Unknown vehicle or vehicle that never received telemetry
+        if (vehicleId == "Unknown" || stats.lastTelemetry == 0) {
+            continue;  // Don't publish status for inactive vehicles
         }
         
         uint32_t lastTelemetryTs = stats.lastTelemetry;
+        // online = true if telemetry received recently (within offline timeout)
         bool online = (now - lastTelemetryTs <= VEHICLE_OFFLINE_TIMEOUT_MS);
 
         int packetCount = stats.packetCount;

@@ -8,7 +8,7 @@ import json
 import time
 import threading
 import signal
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
@@ -41,7 +41,7 @@ QUOTA_ERROR_BACKOFF_MS = 60000
 FAILED_QUEUE_CACHE = "failed_firestore_queue.json"
 
 MIN_WRITE_INTERVAL_MS = 2000  
-TELEMETRY_INTERVAL_MS = 10000  
+TELEMETRY_INTERVAL_MS = 2000  
 last_state_cache = {}
 
 # ==================== GLOBAL STATE ====================
@@ -208,6 +208,7 @@ def normalize_telemetry(vehicle_id, payload):
         "anomaly_flag": payload.get("anomaly_flag", 0),
         "timestamp_ms": payload.get("timestamp", 0),
         "last_updated": firestore.SERVER_TIMESTAMP,
+        "online": True,  # Default online for telemetry
     }
     
     lat = payload.get("latitude", 0)
@@ -222,80 +223,92 @@ def queue_firestore_write(vehicle_id, payload, topic):
     global last_anomaly_ms, last_telemetry_global_ms, last_state_cache
 
     now_ms = int(time.time() * 1000)
-    data = None
-    merge = False
-    ref = None
-
-    if "/status" in topic:
-        last_state = last_state_cache.get(vehicle_id)
-        if last_state == payload:
-            return
-        last_state_cache[vehicle_id] = payload
-        data = payload
-        merge = False
-        # Create new document in status subcollection with auto-generated ID
-        ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("status").document()
-
-    elif "/telemetry" in topic:
+    timestamp_iso = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+    
+    if "/telemetry" in topic:
         last_vehicle = last_telemetry_global_ms.get(vehicle_id, 0)
-        if now_ms - last_vehicle < TELEMETRY_INTERVAL_MS:  # 10s per vehicle
+        if now_ms - last_vehicle < TELEMETRY_INTERVAL_MS:
             return
+        
         last_telemetry_global_ms[vehicle_id] = now_ms
         data = normalize_telemetry(vehicle_id, payload)
-        merge = True
-        ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id)
         
-        # AUTO-CREATE STATUS from telemetry every 30s
-        if now_ms - last_telemetry_global_ms.get(vehicle_id + "_status_auto", 0) >= 30000:
-            last_telemetry_global_ms[vehicle_id + "_status_auto"] = now_ms
-            status_data = {
-                "vehicle_id": vehicle_id,
-                "online": True,
-                "packet_count": payload.get("packet_count", 0),
-                "packet_count_total": payload.get("packet_count_total", 0),
-                "rejected_count": payload.get("rejected_count", 0),
-                "rejected_count_total": payload.get("rejected_count_total", 0),
-                "wifi_rssi": payload.get("wifi_rssi", 0),
-                "heap_free": payload.get("heap_free", 0),
-                "uptime_ms": payload.get("uptime_ms", 0),
-                "timestamp_ms": payload.get("timestamp_ms", int(time.time() * 1000)),
-                "anomaly_flag": payload.get("anomaly_flag", 0),
-                "last_updated": firestore.SERVER_TIMESTAMP
-            }
-            try:
-                # Create status document in subcollection with auto-generated ID
-                status_ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("status").document()
-                status_ref.set(status_data)
-                
-                # AUTO-UPDATE /status/lastest for quick latest access
-                lastest_status_ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("status").document("lastest")
-                lastest_status_ref.set(status_data)
-            except Exception as e:
-                print(f"[ERROR] Auto-create status failed for {vehicle_id}: {e}")
+        # Update online status from last known status message
+        if f"{vehicle_id}_online" in last_state_cache:
+            data["online"] = last_state_cache[f"{vehicle_id}_online"]
         
-    else:
-        data = payload
-        merge = False
-        ref = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id)
+        with batch_lock:
+            if len(pending_batch_ops) + 2 > MAX_PENDING_OPS:
+                log_error(f"Queue overflow: {len(pending_batch_ops)} ops pending")
+                return
+            
+            # Update top-level document (realtime, shows in + add field)
+            ref_toplevel = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id)
+            pending_batch_ops.append({
+                "ref": ref_toplevel,
+                "data": data,
+                "merge": True
+            })
+            
+            # Archive history/{timestamp} - telemetry snapshot only
+            ref_archive = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("history").document(timestamp_iso)
+            pending_batch_ops.append({
+                "ref": ref_archive,
+                "data": data,
+                "merge": False
+            })
+            
+            log_info(f"Queued telemetry top-level + history: vehicle_id={vehicle_id}")
+            
+            if len(pending_batch_ops) >= BATCH_MAX_OPS:
+                trigger_async_flush()
     
-    if data is None or ref is None:
-        log_error(f"Cannot queue Firestore write for topic={topic}")
-        return
-
-    with batch_lock:
-        if len(pending_batch_ops) >= MAX_PENDING_OPS:
-            log_error(f"Queue overflow: {len(pending_batch_ops)} ops pending")
+    elif "/status" in topic:
+        # Throttle status updates
+        last_vehicle_status_ms = last_state_cache.get(f"{vehicle_id}_status_time", 0)
+        
+        if now_ms - last_vehicle_status_ms < 3000:  # 3 second throttle
             return
         
-        pending_batch_ops.append({
-            "ref": ref,
-            "data": data,
-            "merge": merge
-        })
-        log_info(f"Queued Firestore op: vehicle_id={vehicle_id} topic={topic} pending_ops={len(pending_batch_ops)}")
+        last_state_cache[f"{vehicle_id}_status_time"] = now_ms
+        
+        # Cache online status for telemetry to use
+        online_status = payload.get("online", True)
+        last_state_cache[f"{vehicle_id}_online"] = online_status
+        
+        status_data = {
+            "vehicle_id": vehicle_id,
+            "online": online_status,
+            "packet_count": payload.get("packet_count", 0),
+            "packet_count_total": payload.get("packet_count_total", 0),
+            "rejected_count": payload.get("rejected_count", 0),
+            "rejected_count_total": payload.get("rejected_count_total", 0),
+            "wifi_rssi": payload.get("wifi_rssi", 0),
+            "heap_free": payload.get("heap_free", 0),
+            "uptime_ms": payload.get("uptime_ms", 0),
+            "timestamp_ms": payload.get("timestamp_ms", now_ms),
+            "anomaly_flag": payload.get("anomaly_flag", 0),
+            "last_updated": firestore.SERVER_TIMESTAMP
+        }
+        
+        with batch_lock:
+            if len(pending_batch_ops) + 1 > MAX_PENDING_OPS:
+                log_error(f"Queue overflow: {len(pending_batch_ops)} ops pending")
+                return
+            
+            # Archive status/{timestamp} only - no realtime update to top-level
+            ref_archive = firebase_db.collection(FIRESTORE_DB_COLLECTION).document(vehicle_id).collection("status").document(timestamp_iso)
+            pending_batch_ops.append({
+                "ref": ref_archive,
+                "data": status_data,
+                "merge": False
+            })
+            
+            log_info(f"Queued status archive: vehicle_id={vehicle_id}")
+            
+            if len(pending_batch_ops) >= BATCH_MAX_OPS:
+                trigger_async_flush()
 
-        if len(pending_batch_ops) >= BATCH_MAX_OPS:
-            trigger_async_flush()
 
 def trigger_async_flush():
     global active_flush_thread, flush_thread_start_ms
