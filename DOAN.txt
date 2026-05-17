@@ -1,1023 +1,1312 @@
-\subsection{Triển khai, so sánh ba thuật toán kNN Outlier, Mahalanobis và Isolation Forest trong việc phát hiện bất thường}
+\chapter{HIỆN THỰC HÓA VÀ TRIỂN KHAI HỆ THỐNG}
+\lipsum[1-3]
+\section{Môi trường phát triển và Công cụ hỗ trợ}
 
-\subsubsection{Giới thiệu}
+Để hiện thực hóa hệ thống từ bản thiết kế, quy trình triển khai đòi hỏi sự kết hợp của nhiều môi trường lập trình và tập hợp các thư viện chuyên dụng nhằm tối ưu hóa hiệu suất cho cả thiết bị biên và hệ thống trung tâm.
 
-\textbf{Bối cảnh} \\
-Trong kiến trúc giám sát tổng thể, luồng dữ liệu thu thập từ các thiết bị IoT ngày càng lớn và phức tạp. Mặc dù hệ thống hướng tới việc phân tích đa phương thức (bao gồm tín hiệu vô tuyến RF và tọa độ GPS), trong phạm vi của phần đánh giá thuật toán này, dữ liệu được tập trung khai thác là các thông số vật lý cốt lõi: nhiệt độ, độ ẩm và độ rung. Lý do lựa chọn nhóm thông số này là vì đây là đại lượng phản ánh trực tiếp và rõ rệt nhất các sự cố cơ khí hoặc biến động môi trường nguy hiểm trong quá trình vận chuyển.
+\subsection{Phần mềm và Framework phát triển}
 
-\vspace{0.3cm}
-\textbf{Vấn đề} \\
-Phát hiện bất thường trên dữ liệu cảm biến đa chiều gặp hai thách thức chính: sự tương quan phức tạp giữa các biến và sự thay đổi phân bố theo thời gian. Các phương pháp truyền thống như ngưỡng cố định hoặc mô hình đơn biến thường không xét tới mối quan hệ đồng thời giữa các cảm biến. Ví dụ, nhiệt độ và độ rung có thể cùng tăng đột biến khi động cơ xe tải gặp sự cố hoặc khi thùng hàng bị can thiệp vật lý. Phương pháp cảnh báo bằng ngưỡng tĩnh độc lập cho từng cảm biến sẽ rất dễ bỏ sót các mẫu tương quan ẩn (hidden correlations) này.
-
-\vspace{0.3cm}
-\textbf{Mục tiêu} \\
-Nhằm khắc phục những hạn chế của phương pháp cảnh báo ngưỡng tĩnh, nội dung phần này hướng tới việc lựa chọn giải pháp \textbf{học máy (Machine Learning) tối ưu nhất} cho dữ liệu cảm biến thực tế. Cụ thể, các mục tiêu bao gồm:
-\begin{itemize}
-    \item \textbf{Thực nghiệm và so sánh} hiệu quả của ba thuật toán: kNN Outlier, Mahalanobis Distance và Isolation Forest trên không gian đặc trưng vật lý ba chiều ($d=3$: nhiệt độ, độ ẩm, độ rung).
-    \item \textbf{Đo lường định lượng} thông qua các chỉ số hiệu suất phân loại tiêu chuẩn: Accuracy, Recall, F1-score và ROC AUC.
-    \item \textbf{Phân tích} sự đánh đổi (trade-offs) của từng thuật toán dưới góc độ độ tin cậy, chi phí tính toán và khả năng triển khai trên thiết bị nhúng.
-    \item \textbf{Xác định} thuật toán hạt nhân phù hợp nhất để đóng gói vào module Edge ML Inference, làm cơ sở mở rộng cho toàn bộ hệ thống cảnh báo thời gian thực đa phương thức sau này.
-\end{itemize}
-
-\subsubsection{Các công trình liên quan và Lý thuyết nền tảng}
-
-\paragraph{a. Lý thuyết nền tảng} \mbox{} \\
-\textbf{Định nghĩa bài toán phát hiện bất thường:} \\
-Cho tập dữ liệu đầu vào $X = \{x_1, x_2, ..., x_n\}$, trong đó mỗi mẫu $x_i \in \mathbb{R}^d$ là một vector đặc trưng đa chiều thu thập từ hệ thống cảm biến IoT. Trong phạm vi nghiên cứu này, không gian đặc trưng được xác định với số chiều $d=3$, tập trung vào các thông số vật lý cốt lõi phản ánh trực tiếp trạng thái vận hành của thiết bị, bao gồm: nhiệt độ (temperature), độ ẩm (humidity) và độ lớn gia tốc (accel\_magnitude).
-
-Mục tiêu của bài toán là xây dựng các mô hình $f(x)$ nhằm xác định mức độ sai lệch của tổ hợp các thông số này so với trạng thái hoạt động bình thường. Đầu ra của hệ thống bao gồm:
-\begin{itemize}
-    \item \textbf{Điểm bất thường (Anomaly Score):} Thang điểm liên tục $S(x)$ định lượng mức độ dị biệt của mẫu dữ liệu.
-    \item \textbf{Nhãn phân loại:} Tập nhãn rời rạc $\{Normal, Anomaly\}$ được quyết định dựa trên một ngưỡng (threshold) tối ưu áp dụng lên $S(x)$.
-\end{itemize}
-
-\vspace{0.3cm}
-\textbf{Các thuật toán đề xuất (với $d=3$):}
+Việc xây dựng firmware và hệ thống điều phối được thực hiện trên các nền tảng phần mềm tiêu chuẩn, đảm bảo tính tương thích và khả năng quản lý mã nguồn hiệu quả:
 
 \begin{itemize}
-    \item \textbf{k-Nearest Neighbors (kNN) Outlier:} \\
-    Thuật toán đánh giá mức độ bất thường dựa trên trung bình khoảng cách hình học từ điểm dữ liệu đến $k$ láng giềng gần nhất của nó trong không gian 3 chiều. Điểm bất thường (Anomaly Score) được tính theo công thức:
-    $$S_{kNN}(x) = \frac{1}{k} \sum_{x_i \in N_k(x)} dist(x, x_i)$$
-    \textbf{Giải thích tham số:}
-    \begin{itemize}
-        \item $x$: Vector đặc trưng của điểm dữ liệu đang xét (nhiệt độ, độ ẩm, độ rung).
-        \item $k$: Số lượng láng giềng gần nhất được xem xét.
-        \item $N_k(x)$: Tập hợp $k$ láng giềng gần nhất của $x$ trong tập dữ liệu.
-        \item $dist(x, x_i)$: Khoảng cách Euclidean giữa $x$ và láng giềng $x_i$, được tính bằng $\sqrt{\sum_{j=1}^{3} (x^{(j)} - x_i^{(j)})^2}$.
-    \end{itemize}
-
-    \item \textbf{Mahalanobis Distance:} \\
-    Thay vì sử dụng khoảng cách Euclidean thông thường, khoảng cách Mahalanobis đo lường độ lệch của một điểm so với trọng tâm của phân phối dữ liệu, đồng thời xét đến sự tương quan giữa các biến số. Công thức tính:
-    $$D_M(x) = \sqrt{(x - \mu)^T \Sigma^{-1} (x - \mu)}$$
-    \textbf{Giải thích tham số:}
-    \begin{itemize}
-        \item $x$: Vector đặc trưng 3 chiều của dữ liệu đầu vào.
-        \item $\mu$: Vector trung bình (Mean vector) của tập dữ liệu ở trạng thái bình thường.
-        \item $\Sigma$: Ma trận hiệp phương sai (Covariance matrix) kích thước $3 \times 3$, biểu diễn mối tương quan giữa nhiệt độ, độ ẩm và độ rung.
-        \item $\Sigma^{-1}$: Ma trận nghịch đảo của ma trận hiệp phương sai.
-        \item $T$: Ký hiệu phép chuyển vị ma trận.
-    \end{itemize}
-
-    \item \textbf{Isolation Forest:} \\
-    Thuật toán xây dựng một rừng các cây quyết định ngẫu nhiên (Isolation Trees) để phân tách dữ liệu. Điểm bất thường được tính dựa trên độ sâu của lá chứa điểm dữ liệu đó (những điểm dị thường dễ bị cô lập nên đường đi sẽ ngắn hơn). Công thức đánh giá điểm bất thường $s(x, n)$:
-    $$s(x, n) = 2^{-\frac{E(h(x))}{c(n)}}$$
-    \textbf{Giải thích tham số:}
-    \begin{itemize}
-        \item $x$: Điểm dữ liệu cần đánh giá.
-        \item $n$: Kích thước của tập dữ liệu huấn luyện.
-        \item $h(x)$: Độ dài đường đi (Path length) tính từ nút gốc đến nút lá chứa điểm $x$.
-        \item $E(h(x))$: Giá trị kỳ vọng của $h(x)$ trên tập hợp tất cả các cây trong rừng.
-        \item $c(n)$: Chiều dài đường đi trung bình dùng làm hệ số chuẩn hóa. Nếu $s(x, n)$ tiến gần tới 1, mẫu dữ liệu có xác suất bất thường rất cao.
-    \end{itemize}
+    \item \textbf{Visual Studio Code (VS Code):} Đây là môi trường phát triển tích hợp (IDE) chính được sử dụng để soạn thảo mã nguồn cho toàn bộ hệ thống, từ firmware C++ đến các script Python điều phối.
+    \item \textbf{PlatformIO IDE:} Được tích hợp như một tiện ích mở rộng trong VS Code, PlatformIO đóng vai trò quản lý dự án cho vi điều khiển ESP32. Công cụ này hỗ trợ quản lý thư viện tự động, cấu hình thông số nạp chương trình và cung cấp môi trường debug chuyên nghiệp thông qua tệp \texttt{platformio.ini}.
+    \item \textbf{Tremo SDK:} Đối với các module LoRa RA-08H (dựa trên chip ASR6601), hệ thống sử dụng Tremo SDK. Đây là bộ công cụ phát triển dựa trên ngôn ngữ C thuần, cho phép can thiệp sâu vào các thanh ghi của chip để cấu hình tham số vật lý cho lớp truyền dẫn vô tuyến.
+    \item \textbf{Môi trường Python 3.x:} Được sử dụng để vận hành bộ điều phối MQTT-to-Firebase Bridge trên máy chủ trung tâm. Hệ thống tận dụng các môi trường ảo (\textit{venv}) để quản lý độc lập các phụ thuộc về thư viện xử lý dữ liệu.
 \end{itemize}
 
-\vspace{0.3cm}
-\paragraph{b. Các công trình và Công nghệ liên quan} \mbox{} \\
-\textbf{Các phương pháp tiếp cận truyền thống:} \\
-Trước đây, việc phát hiện sự cố thường dựa trên các phương pháp cơ bản như:
-\begin{itemize}
-    \item \textbf{Ngưỡng tĩnh trên từng biến đơn lẻ:} Dễ triển khai nhưng không nắm bắt được sự tương quan (ví dụ: nhiệt độ và độ rung cùng tăng khi có sự cố cơ khí).
-    \item \textbf{Mô hình Gaussian đơn biến:} Giả định dữ liệu tuân theo phân phối chuẩn, không phù hợp với dữ liệu nhiễu và phân phối phức tạp trong thực tế.
-    \item \textbf{Phân cụm K-Means:} Khó xác định ngưỡng dị thường chính xác tại các vùng biên của cụm và tốn kém tài nguyên tính toán khi dữ liệu lớn.
-\end{itemize}
+\subsection{Các thư viện lập trình then chốt}
 
-\vspace{0.3cm}
-\textbf{Công nghệ và Công cụ đề xuất:} \\
-Hệ thống sử dụng hệ sinh thái mã nguồn mở của Python để triển khai thực nghiệm:
-\begin{itemize}
-    \item \textbf{Python \& Scikit-learn:} Thư viện tiêu chuẩn hỗ trợ triển khai tối ưu các thuật toán kNN, Covariance (Mahalanobis) và Isolation Forest.
-    \item \textbf{Pandas \& NumPy:} Xử lý tập dữ liệu đa chiều và thực hiện các phép toán ma trận hiệu năng cao.
-    \item \textbf{Matplotlib \& Seaborn:} Trực quan hóa dữ liệu và biểu đồ so sánh hiệu năng (Accuracy, Recall, ROC AUC) giữa các mô hình.
-\end{itemize}
-
-\vspace{0.3cm}
-\textbf{Lý do lựa chọn 3 thuật toán thực nghiệm:}
-\begin{itemize}
-    \item \textbf{kNN Outlier:} Nhạy bén trong việc phát hiện các điểm dị biệt cục bộ dựa trên khoảng cách hình học.
-    \item \textbf{Mahalanobis Distance:} Khai thác ma trận hiệp phương sai để mô hình hóa sự tương quan tuyến tính giữa nhiệt độ, độ ẩm và độ rung.
-    \item \textbf{Isolation Forest:} Kháng nhiễu tốt, không yêu cầu giả định về phân phối dữ liệu và hoạt động hiệu quả trên các luồng dữ liệu IoT thực tế.
-\end{itemize}
-
-\subsubsection{Bài toán và Thách thức (Problem Statement \& Challenges)}
-
-\paragraph{Mục đích}
-Mục tiêu của phần này là định nghĩa một cách chặt chẽ không gian đầu vào (Input) và đầu ra (Output) của mô hình phân tích, đồng thời trình bày các khó khăn kỹ thuật cốt lõi cần được giải quyết. Quá trình thực nghiệm không chỉ dừng lại ở việc so sánh hiệu năng tĩnh của các thuật toán (kNN, Mahalanobis, Isolation Forest) trên dữ liệu nhiệt độ, độ ẩm và độ rung, mà còn phải đánh giá tính khả thi khi triển khai các mô hình này trong một hệ thống giám sát thời gian thực.
-
-\paragraph{Mô tả Dữ liệu (Dataset)}
-\begin{itemize}
-    \item \textbf{Nguồn dữ liệu:} Dữ liệu thực nghiệm được tổng hợp thông qua một kịch bản giả lập (simulation script) nhằm mô phỏng sát với môi trường vận hành thực tế của thiết bị. Quá trình mô phỏng này tạo ra các tổ hợp giá trị đặc trưng, bao gồm các chu kỳ thiết bị hoạt động ổn định (được gán nhãn \texttt{NORMAL}) và các sự kiện phát sinh lỗi cơ khí hoặc biến động môi trường (được gán nhãn \texttt{ANOMALY}).
-    \item \textbf{Không gian đặc trưng ($d=3$):} Dữ liệu tập trung vào ba thông số vật lý chính: \texttt{temperature} (Nhiệt độ), \texttt{humidity} (Độ ẩm) và \texttt{accel\_magnitude} (Độ lớn gia tốc/Độ rung).
-    \item \textbf{Quy mô dữ liệu:} Thực nghiệm được tiến hành trên tập dữ liệu thực nghiệm bao gồm tổng cộng 26,000 mẫu. Trong đó, tập dữ liệu được gán nhãn trước bao gồm 20,000 mẫu ở trạng thái bình thường (\texttt{NORMAL}) và 6,000 mẫu chứa các biểu hiện bất thường (\texttt{ANOMALY}). Tỷ lệ mất cân bằng dữ liệu này phản ánh đúng thực tế vận hành, nơi các sự cố thường hiếm khi xảy ra.
-    \item \textbf{Vai trò của dữ liệu:} Tập dữ liệu này đóng vai trò nền tảng cho toàn bộ quá trình: (1) Huấn luyện và khớp (fitting) các mô hình, (2) Tinh chỉnh các tham số (ví dụ: số láng giềng $k$ trong kNN, tỷ lệ nhiễm bẩn \texttt{contamination} trong Isolation Forest), và (3) Đánh giá chéo hiệu suất của ba thuật toán.
-\end{itemize}
-
-\paragraph{Định nghĩa Đầu vào và Đầu ra (Input/Output Specification)}
-\begin{itemize}
-    \item \textbf{Đầu vào (Input):} Ma trận dữ liệu dưới định dạng CSV, trong đó mỗi hàng biểu diễn một bản ghi cảm biến tại một thời điểm $t$. Các cột đầu vào bao gồm ba đặc trưng số thực ($x \in \mathbb{R}^3$): \texttt{temperature}, \texttt{humidity}, \texttt{accel\_magnitude} và một cột nhãn thực tế \texttt{label} $\in \{\texttt{NORMAL}, \texttt{ANOMALY}\}$ dùng cho pha đánh giá.
-    \item \textbf{Đầu ra (Output):} Đối với mỗi vector đầu vào $x_i$, mô hình trả về bộ đôi giá trị:
-        \begin{itemize}
-            \item \texttt{anomaly\_score} ($S(x_i)$): Giá trị số thực (thường được chuẩn hóa) biểu diễn xác suất hoặc mức độ sai lệch của mẫu dữ liệu.
-            \item \texttt{prediction}: Nhãn phân loại cuối cùng thuộc tập $\{\texttt{NORMAL}, \texttt{ANOMALY}\}$, được quyết định dựa trên việc so sánh $S(x_i)$ với một ngưỡng quyết định tối ưu.
-        \end{itemize}
-\end{itemize}
-
-\paragraph{Các Thách thức Kỹ thuật (Technical Challenges)}
-Việc xây dựng một module phát hiện bất thường đáng tin cậy cho hệ thống IoT đối mặt với những thách thức cụ thể sau:
-\begin{itemize}
-    \item \textbf{Khối lượng dữ liệu và Độ trễ (Volume \& Real-time Processing):} Trong môi trường thực tế, tần số lấy mẫu từ cảm biến là rất cao, tạo ra một dòng dữ liệu liên tục (Data Stream). Mô hình phải đảm bảo tốc độ suy luận (Inference time) cực thấp, tránh tình trạng thắt cổ chai tính toán (Bottleneck) để hệ thống có thể phát đi cảnh báo sự cố ngay lập tức.
-    \item \textbf{Độ phức tạp và Tương quan Đa biến (Complexity \& Correlation):} Các sự cố cơ khí hiếm khi chỉ bộc lộ qua một thông số duy nhất. Thách thức cốt lõi là mô hình phải học và nắm bắt được các mối quan hệ tuyến tính và phi tuyến giữa nhiệt độ, độ ẩm và độ rung, thay vì chỉ đánh giá từng biến số một cách cô lập.
-    \item \textbf{Phân tán Dữ liệu và Kiến trúc Edge Computing:} Hệ thống thực tế thu thập dữ liệu từ nhiều node phân tán. Việc đẩy toàn bộ dữ liệu thô về máy chủ trung tâm (Cloud) để phân tích sẽ gây quá tải băng thông mạng. Do đó, cần thiết kế thuật toán sao cho có khả năng đóng gói (Containerization) và triển khai xử lý cục bộ ngay tại các thiết bị biên (Edge Devices/Gateway).
-    \item \textbf{Khó khăn trong Trực quan hóa Không gian Đa chiều:} Mặc dù đã giảm xuống không gian 3 chiều, việc minh họa biên giới quyết định của các thuật toán vẫn khá phức tạp. Do đó, hệ thống cần ứng dụng thêm các kỹ thuật giảm chiều dữ liệu phi tuyến tính (như t-SNE hoặc UMAP) để chiếu dữ liệu xuống mặt phẳng 2D. Các hình ảnh chiếu này đóng vai trò phân tích định tính (Qualitative Analysis), giúp quan sát mức độ phân tách giữa cụm dữ liệu \texttt{NORMAL} và \texttt{ANOMALY}, hỗ trợ củng cố độ tin cậy của các chỉ số đánh giá định lượng.
-\end{itemize}
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.9\linewidth]{images/tSNE.png}
-    \caption{Phân bố dữ liệu NORMAL và ANOMALY trên không gian 2D bằng t-SNE}
-    \label{fig:placeholder}
-\end{figure}
-
-\subsubsection{Giải pháp đề xuất (Proposed Solution)}
-
-\paragraph{Kiến trúc hệ thống}
-Kiến trúc hệ thống được thiết kế theo dạng đường ống xử lý dữ liệu (Data Pipeline) khép kín, từ khâu thu thập tín hiệu thô đến khâu đưa ra quyết định cảnh báo và trực quan hóa kết quả. Các thành phần chính bao gồm:
+Sự ổn định và tính bảo mật của hệ thống được củng cố bởi các thư viện mã nguồn mở uy tín, giúp giải quyết các bài toán về an ninh, định dạng dữ liệu và giao tiếp mạng:
 
 \begin{itemize}
-    \item \textbf{Khối Thu thập dữ liệu:} Tiếp nhận luồng tín hiệu cảm biến vật lý (nhiệt độ, độ ẩm, độ rung) từ các thiết bị/gateway theo chu kỳ thời gian thực.
-    \item \textbf{Khối Tiền xử lý:} Làm sạch dữ liệu, loại bỏ các nhiễu hệ thống, chuẩn hóa thang đo của các biến liên tục và chuẩn hóa nhãn phục vụ đánh giá.
-    \item \textbf{Khối Huấn luyện mô hình:} Tiến hành huấn luyện ba thuật toán (kNN, Mahalanobis, Isolation Forest) trên tập Train chứa toàn bộ mẫu dữ liệu ở trạng thái bình thường (\texttt{NORMAL}) để học các đặc trưng phân phối và xây dựng ranh giới quyết định.
-    \item \textbf{Khối Tinh chỉnh ngưỡng:} Xác định ngưỡng tối ưu ($Threshold$) cho từng thuật toán dựa trên phân phối của điểm bất thường (\texttt{Anomaly Score}) trên tập Validation (chứa giỗi cả dữ liệu NORMAL và ANOMALY).
-    \item \textbf{Khối Đánh giá và So sánh:} Thực hiện kiểm thử trên tập Test độc lập (hoàn toàn không được dùng trong huấn luyện và tuning) để đo lường các chỉ số hiệu năng (Accuracy, Precision, Recall, F1-score, ROC AUC) và so sánh sự khác biệt giữa ba thuật toán.
-    \item \textbf{Khối Phân tích trực quan:} Trình bày kết quả dưới dạng biểu đồ phân phối, đường cong ROC và các kỹ thuật giảm chiều không gian để đánh giá định tính mức độ phân tách dữ liệu.
+    \item \textbf{mbedTLS:} Là thư viện cốt lõi cho các tác vụ an ninh tại biên. Hệ thống khai thác các module của mbedTLS để hiện thực hóa thuật toán mã hóa đối xứng AES-128 CBC và mã xác thực HMAC-SHA256, đảm bảo gói tin luôn được bảo mật và xác thực toàn vẹn trước khi truyền đi.
+    \item \textbf{ArduinoJson:} Thư viện này được sử dụng xuyên suốt để xử lý định dạng dữ liệu JSON. Nó cho phép hệ thống thực hiện tuần tự hóa (\textit{Serialization}) các thông số cảm biến thành chuỗi tối giản tại Node TX và giải mã (\textit{Deserialization}) hiệu quả tại Gateway để trích xuất thông tin đầu vào cho các mô hình AI.
+    \item \textbf{PubSubClient:} Đây là thư viện quản lý giao thức MQTT trên vi điều khiển ESP32. PubSubClient hỗ trợ Gateway duy trì kết nối bền vững với Mosquitto Broker, thực hiện việc xuất bản (\textit{Publish}) dữ liệu vận tải và đăng ký (\textit{Subscribe}) các chủ đề điều khiển từ trung tâm.
+    \item \textbf{Paho-MQTT và Firebase Admin SDK:} Trên hệ thống trung tâm, hai thư viện này phối hợp để cầu nối dữ liệu hoạt động ổn định. Paho-MQTT chịu trách nhiệm thu nhận dữ liệu từ Broker theo thời gian thực, trong khi Firebase Admin SDK đảm nhận việc ghi dữ liệu theo lô (\textit{Batch Write}) vào Cloud Firestore để tối ưu hóa hiệu suất lưu trữ.
+    \item \textbf{TensorFlow Lite for Microcontrollers:} Thư viện này hỗ trợ việc nhúng và thực thi mô hình Mạng Neuron nhân tạo (\textit{Neural Network}) đã được tối ưu hóa trực tiếp trên tài nguyên hạn chế của Gateway.
 \end{itemize}
 
-\paragraph{Phương pháp hiện thực (Implementation)}
+\section{Hiện thực hóa Firmware cho Thiết bị biên (Node TX)}
 
-\textbf{Luồng xử lý Huấn luyện mô hình (Model Training Pipeline)} \mbox{} \\
-Quá trình huấn luyện các thuật toán phát hiện bất thường được thiết kế theo quy trình tuần tự, từ chuẩn bị dữ liệu đến đánh giá và so sánh hiệu năng. Mục tiêu là xác định thuật toán tối ưu nhất dựa trên các chỉ số hiệu suất trên tập độc lập. Các bước chính trong luồng xử lý như sau:
+Firmware của thiết bị biên được triển khai theo kiến trúc hai module độc lập. Vi điều khiển ESP32 đảm nhiệm việc thu thập và xử lý dữ liệu cảm biến, đồng thời thực hiện các cơ chế bảo mật. Module LoRa (Tremo/ASR6601) chịu trách nhiệm đóng khung dữ liệu và truyền thông vô tuyến.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.7\linewidth]{images/training_algorithm_pipeline.png}
-    \caption{Luồng xử lý tuần tự huấn luyện ba thuật toán: từ chuẩn bị dữ liệu, chia tập, huấn luyện, tinh chỉnh ngưỡng, đánh giá đến so sánh kết quả}
-    \label{fig:training_pipeline}
-\end{figure}
+\subsection{Tầng thu thập dữ liệu và xử lý đa nhiệm trên ESP32}
 
-\begin{enumerate}
-    \item \textbf{Nhập và làm sạch dữ liệu:} Đọc tập dữ liệu CSV, loại bỏ các bản ghi với giá trị thiếu (NaN) hoặc nhãn không xác định.
-    
-    \item \textbf{Chuẩn hóa đặc trưng:} Áp dụng \texttt{StandardScaler} để đưa ba đặc trưng (nhiệt độ, độ ẩm, độ rung) về cùng phân phối chuẩn.
-    
-    \item \textbf{Chia dữ liệu:} Phân chia thành ba tập con với tỷ lệ 52.5\% Train (chỉ NORMAL) / 17.5\% Validation (NORMAL + ANOMALY) / 30\% Test (NORMAL + ANOMALY). Cụ thể: đầu tiên chia thành 70\% tạm thời (Train + Validation) và 30\% Test, sau đó chia 70\% thành 75\% Train và 25\% Validation.
-    
-    \item \textbf{Huấn luyện ba mô hình song song:} Tiến hành huấn luyện đồng thời ba thuật toán (kNN, Mahalanobis, Isolation Forest) trên tập Train để học phân phối dữ liệu bình thường.
-    
-    \item \textbf{Tuning ngưỡng quyết định:} Dùng tập Validation để tìm kiếm ngưỡng tối ưu cho mỗi thuật toán. Đối với kNN và Mahalanobis, thử các mức Quantile khác nhau (0.95, 0.98, 0.99); với Isolation Forest, thử các giá trị contamination (0.01, 0.02, 0.05, 0.1). Chọn cấu hình tối ưu hóa chỉ số F1 trên Validation.
-    
-    \item \textbf{Đánh giá và so sánh trên tập Test:} Kiểm thử ba mô hình trên tập Test hoàn toàn độc lập, tính toán các chỉ số hiệu năng (Accuracy, Recall, Precision, F1-score, ROC AUC). Phân tích và so sánh kết quả giữa kNN, Mahalanobis và Isolation Forest để xác định thuật toán tối ưu nhất cho triển khai trong hệ thống thực tế.
-\end{enumerate}
+\subsubsection{Xử lý đa nhiệm FreeRTOS cho các tác vụ cảm biến}
 
-\textbf{Triển khai các thuật toán Anomaly Detection }\mbox{} \\
-Hệ thống hiện thực ba mô hình dựa trên các logic toán học đã trình bày:
-\begin{itemize}
-    \item \textbf{kNN Outlier:} Sử dụng lớp \texttt{NearestNeighbors} để tìm $k+1$ láng giềng. Điểm bất thường được xác định bằng khoảng cách trung bình từ mẫu xét đến $k$ láng giềng (sau khi loại bỏ chính nó).
-    \item \textbf{Mahalanobis Distance:} Ước lượng vector trung bình và ma trận hiệp phương sai nghịch đảo từ tập dữ liệu \texttt{NORMAL}. Khoảng cách từ mẫu mới đến phân phối chuẩn này chính là điểm bất thường.
-    \item \textbf{Isolation Forest:} Huấn luyện rừng các cây cô lập ngẫu nhiên. Điểm bất thường được trích xuất thông qua hàm đối số của \texttt{decision\_function}.
-\end{itemize}
+Hệ thống thu thập dữ liệu từ nhiều cảm biến gồm GPS, DHT11, ADXL345 và LDR. Để đảm bảo khả năng xử lý đồng thời, firmware được triển khai dựa trên FreeRTOS, trong đó mỗi cảm biến được tách thành một task độc lập.
 
-\textbf{Các hàm hiện thực cốt lõi }\mbox{} \\
-Dưới đây là các đoạn mã quan trọng được triển khai bằng thư viện \texttt{scikit-learn}:
+Các task được gán chu kỳ và mức ưu tiên phù hợp với đặc tính dữ liệu. Cách tiếp cận này giúp tránh hiện tượng blocking trong mô hình tuần tự, đồng thời đảm bảo dữ liệu từ các nguồn có tốc độ khác nhau (đặc biệt là GPS) không bị mất.
 
-\begin{lstlisting}[language=Python, caption=Hiện thực các mô hình phát hiện bất thường]
-# k-Nearest Neighbors
-knn_model = NearestNeighbors(n_neighbors=k+1)
-knn_model.fit(X_train_normal)
-distances, indices = knn_model.kneighbors(X_test)
-knn_scores = distances[:, 1:].mean(axis=1)
+\subsubsection{Đồng bộ hóa dữ liệu bằng Mutex}
 
-# Mahalanobis Distance
-mean = X_train_normal.mean(axis=0)
-cov = np.cov(X_train_normal, rowvar=False)
-cov += np.eye(cov.shape[0]) * 1e-6  # Regularization
-inv_cov = np.linalg.pinv(cov)       # Pseudo-inverse
-delta = X_test - mean
-mahalanobis_scores = np.sqrt(np.sum(np.dot(delta, inv_cov) * delta, axis=1))
+Dữ liệu cảm biến được lưu trong cấu trúc dùng chung \texttt{SensorData}. Do nhiều task có thể truy cập đồng thời, hệ thống sử dụng mutex để đảm bảo tính nhất quán dữ liệu.
 
-# Isolation Forest
-iso_model = IsolationForest(contamination=c, random_state=42, n_estimators=100)
-iso_model.fit(X_train_normal)
-iso_scores = -iso_model.decision_function(X_test)
-\end{lstlisting}
+Mỗi task khi ghi dữ liệu đều thực hiện khóa mutex trước khi cập nhật và giải phóng sau khi hoàn tất. Task truyền thông chỉ đọc dữ liệu thông qua bản sao cục bộ nhằm giảm thời gian chiếm dụng tài nguyên đồng bộ.
 
-\paragraph{Cấu hình môi trường và Công cụ}
-Hệ thống được triển khai trên nền tảng ngôn ngữ Python 3.10+ với các thư viện hỗ trợ chính:
-\begin{itemize}
-    \item \textbf{Scikit-learn:} Thư viện chính cho việc triển khai thuật toán và đo lường hiệu năng.
-    \item \textbf{Pandas \& NumPy:} Quản lý cấu trúc dữ liệu và thực hiện các phép toán đại số tuyến tính.
-    \item \textbf{Matplotlib \& Seaborn:} Công cụ vẽ biểu đồ phân phối điểm số và đường cong ROC.
-    \item \textbf{UMAP/t-SNE:} Hỗ trợ trực quan hóa không gian dữ liệu đa chiều xuống 2D để quan sát mức độ hội tụ và phân tách của các nhóm mẫu.
-\end{itemize}
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Kiến trúc đa nhiệm FreeRTOS trên Node TX,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
 
-\vspace{0.2cm}
-\noindent Các import chính trong chương trình:
-\begin{lstlisting}[language=Python]
-import pandas as pd
-import numpy as np
-from sklearn.neighbors import LocalOutlierFactor
-from sklearn.covariance import EllipticEnvelope
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
-import seaborn as sns
-from umap import UMAP
-from sklearn.manifold import TSNE
-\end{lstlisting}
+KHỞI TẠO HỆ THỐNG
 
-\subsubsection{Đánh giá và Thử nghiệm (Evaluation \& Experiments)}
+Khởi tạo UART, I2C, ADC
+Khởi tạo cảm biến: DHT11, ADXL345, GPS, LDR
+Khởi tạo LoRa UART
 
-\paragraph{Mục tiêu đánh giá}
-Quá trình thử nghiệm được thiết kế nhằm giải quyết các mục tiêu cốt lõi sau:
-\begin{itemize}
-    \item \textbf{Đánh giá hiệu năng phân loại:} Đo lường và so sánh khả năng phát hiện điểm bất thường của ba thuật toán (kNN Outlier, Mahalanobis Distance, Isolation Forest) trên cùng một tập dữ liệu cảm biến đa chiều.
-    \item \textbf{Phân tích định lượng:} So sánh chi tiết thông qua các hệ đo lường chuẩn: Độ chính xác tổng thể (Accuracy), Độ nhạy (Recall), Độ chính xác dự đoán dương (Precision), Điểm F1 (F1-score) và Diện tích dưới đường cong ROC (ROC AUC).
-    \item \textbf{Kiểm chứng tính khả thi:} Đánh giá thời gian suy luận (Inference time) để xác định thuật toán nào đáp ứng tốt nhất yêu cầu cảnh báo thời gian thực trong môi trường IoT có tốc độ phát sinh dữ liệu cao.
-\end{itemize}
+Khởi tạo biến dùng chung:
+  sensorData
 
-\paragraph{Môi trường và Cấu hình thử nghiệm}
-\begin{itemize}
-    \item \textbf{Cấu hình phần cứng:} Thực nghiệm được chạy trên máy tính có CPU 4 nhân và 16GB RAM. Mặc dù báo cáo này không sử dụng cụm máy chủ phân tán (cluster), nhưng kiến trúc đề xuất hoàn toàn có thể mở rộng để triển khai trên các thiết bị Edge hoặc Cloud Server.
-    \item \textbf{Môi trường phần mềm:} Sử dụng ngôn ngữ Python 3.10+ cùng hệ sinh thái thư viện khoa học dữ liệu bao gồm: \texttt{scikit-learn} (mô hình hóa), \texttt{pandas}, \texttt{numpy} (xử lý dữ liệu), \texttt{matplotlib} và \texttt{seaborn} (trực quan hóa).
-\end{itemize}
+Khởi tạo mutex:
+  sensorDataMutex
 
-\paragraph{Chiến lược Dữ liệu và Kịch bản Kiểm thử}
-\textbf{Dữ liệu thử nghiệm:}
-Tập dữ liệu chính \texttt{dataML.csv} bao gồm 26.000 mẫu (20.000 mẫu \texttt{NORMAL} và 6.000 mẫu \texttt{ANOMALY}). Toàn bộ đặc trưng được chuẩn hóa bằng \texttt{StandardScaler} để đảm bảo tính nhất quán về mặt khoảng cách. Dữ liệu được chia làm ba phần:
-\begin{itemize}
-    \item \textit{Train Set:} Chỉ chứa các mẫu \texttt{NORMAL} để huấn luyện mô hình học giới hạn an toàn.
-    \item \textit{Validation Set:} Sử dụng để tinh chỉnh tham số và thiết lập ngưỡng (threshold) quyết định.
-    \item \textit{Test Set:} Chứa cả mẫu \texttt{NORMAL} và \texttt{ANOMALY} để đánh giá chéo hiệu năng thực tế.
-\end{itemize}
+Khởi tạo node_id
 
-\vspace{0.3cm}
-\textbf{Kịch bản kiểm thử (Testcases):}
-\begin{itemize}
-    \item \textbf{Testcase 1:} Chạy mô hình trên tập dữ liệu nhỏ để kiểm chứng trực quan và đo lường chi tiết các chỉ số phân loại (Accuracy, Precision, Recall, F1-score, ROC AUC).
-    \item \textbf{Testcase 2:} Đưa toàn bộ tập dữ liệu lớn vào để đo đạc thời gian huấn luyện và thời gian suy luận thực tế (Inference time), qua đó đánh giá khả năng mở rộng.
-    \item \textbf{Testcase 3:} Kiểm tra khả năng chống chịu của mô hình với sự phân bố bất cân bằng giữa dữ liệu bình thường và bất thường để tìm ra ngưỡng (threshold) tối ưu nhất.
-\end{itemize}
+Tạo các task:
+  Task_DHT11        (priority 1)
+  Task_ADXL345      (priority 1)
+  Task_GPS          (priority 1)
+  Task_Tamper_LDR   (priority 2)
+  Task_LoRa_Send    (priority 1)
 
-\paragraph{Trực quan hóa Dữ liệu}
+-----TASK: ĐỌC DHT11-----
 
-\begin{figure}[H]
-    \centering
-    % Hình 1: kNN Outlier Anomaly Score Distribution
-    \begin{subfigure}[b]{0.9\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/kNNoutlier.png}
-        \caption{Phân phối Anomaly Score - kNN Outlier}
-        \label{fig:knn_score_dist}
-    \end{subfigure}
-    \hfill
-    % Hình 2: Mahalanobis Anomaly Score Distribution
-    \begin{subfigure}[b]{0.9\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/Mahalanobis.png}
-        \caption{Phân phối Anomaly Score - Mahalanobis Distance}
-        \label{fig:maha_score_dist}
-    \end{subfigure}
-    \hfill
-    % Hình 3: Isolation Forest Anomaly Score Distribution
-    \begin{subfigure}[b]{0.9\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/IsolationForest.png}
-        \caption{Phân phối Anomaly Score - Isolation Forest}
-        \label{fig:iso_score_dist}
-    \end{subfigure}
-    
-    \caption{Biểu đồ phân phối Anomaly Score của ba thuật toán: kNN Outlier, Mahalanobis Distance và Isolation Forest (cột dọc đỏ là ngưỡng quyết định tối ưu)}
-    \label{fig:anomaly_score_distribution}
-\end{figure}
+Chu kỳ 5s:
+  Đọc nhiệt độ, độ ẩm
+  Nếu lỗi → gán -999
 
-\begin{figure}[H]
-    \centering
-    % Hình 1: ROC kNN
-    \begin{subfigure}[b]{0.4\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/ROCKNN.png}
-        \caption{kNN Outlier}
-        \label{fig:roc_knn}
-    \end{subfigure}
-    \hfill
-    % Hình 2: ROC Mahalanobis
-    \begin{subfigure}[b]{0.4\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/ROCMAHALA.png}
-        \caption{Mahalanobis}
-        \label{fig:roc_mahala}
-    \end{subfigure}
-    \hfill
-    % Hình 3: ROC Isolation Forest
-    \begin{subfigure}[b]{0.4\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/ROCISOLATION.png}
-        \caption{Isolation Forest}
-        \label{fig:roc_iforest}
-    \end{subfigure}
-    
-    \caption{So sánh đường cong ROC (ROC Curve) giữa kNN Outlier, Mahalanobis và Isolation Forest.}
-    \label{fig:roc_comparison}
-\end{figure}
+  Khóa mutex
+    cập nhật sensorData
+  Mở khóa
 
-\begin{figure}[H]
-    \centering
-    % Hình 1: t-SNE
-    \begin{subfigure}[b]{0.48\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/tSNE.png}
-        \caption{Phân bố bằng t-SNE}
-        \label{fig:tsne}
-    \end{subfigure}
-    \hfill
-    % Hình 2: UMAP
-    \begin{subfigure}[b]{0.48\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{images/umap.png}
-        \caption{Phân bố bằng UMAP}
-        \label{fig:umap}
-    \end{subfigure}
-    
-    \caption{Hình chiếu mô tả mức độ phân tách giữa dữ liệu NORMAL và ANOMALY trên không gian 2D thông qua các thuật toán giảm chiều.}
-    \label{fig:tsne_umap_comparison}
-\end{figure}
+-----TASK: ĐỌC ADXL345-----
+
+Chu kỳ 1s:
+  Đọc gia tốc (x, y, z)
+  Tính gia tốc tổng → accel
+
+  Nếu lỗi → accel = -999
+
+  Khóa mutex
+    cập nhật sensorData.accel
+  Mở khóa
+
+-----TASK: ĐỌC GPS-----
+
+Chu kỳ 100ms:
+  Nếu có dữ liệu hợp lệ:
+    Khóa mutex
+      cập nhật vị trí và vệ tinh
+    Mở khóa
+
+-----TASK: GIÁM SÁT LDR-----
+
+Chu kỳ 100ms:
+  Nếu ánh sáng vượt ngưỡng:
+    kích hoạt cảnh báo tamper
+
+-----TASK: GỬI LoRa-----
+
+Chu kỳ T (ví dụ 2s):
+
+  Khóa mutex
+    sao chép sensorData → localData
+  Mở khóa
+
+  Gọi:
+    Đóng_gói_và_Truyền_Dữ_liệu(localData)
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Đóng gói dữ liệu và bảo mật tại nguồn}
+
+\subsection{Đóng gói dữ liệu và bảo mật tại nguồn}
+
+Sau khi thu thập, dữ liệu được chuẩn hóa và đóng gói trước khi truyền. Để giảm kích thước payload, các trường JSON được rút gọn thành các ký hiệu ngắn như \texttt{"t"} (nhiệt độ), \texttt{"h"} (độ ẩm), \texttt{"a"} (gia tốc), \texttt{"l"} (ánh sáng), \texttt{"x"} (trạng thái tamper), \texttt{"la"}, \texttt{"lo"} (tọa độ GPS).
+
+\begin{tcolorbox}[
+    colback=gray!5!white,      
+    colframe=black!70,         
+    title=\textbf{JSON:} Ví dụ cấu trúc Payload,
+    arc=4pt,                   
+    boxrule=1pt,               
+    left=5pt, right=5pt, top=5pt, bottom=5pt
+]
+\begin{verbatim}
+{
+  "t": 31.8,
+  "h": 63.0,
+  "a": 0.12,
+  "l": 549,
+  "x": 0,
+  "la": 10.8003567,
+  "lo": 106.7062972
+}
+\end{verbatim}
+\end{tcolorbox}
+
+Trước khi đóng gói, hệ thống kiểm tra tính hợp lệ của dữ liệu. Các giá trị lỗi hoặc không hợp lệ được gán giá trị \texttt{-999} để đánh dấu, cho phép phía nhận phát hiện và xử lý.
+
+Để giảm xung đột truyền trong mạng nhiều node, mỗi thiết bị áp dụng cơ chế time-slot dựa trên \texttt{node\_id}. Thiết bị chỉ thực hiện truyền khi đến khe thời gian tương ứng.
+
+Về bảo mật, payload được xử lý theo hai bước. Trước tiên, dữ liệu JSON được ký bằng HMAC-SHA256 với khóa bí mật dùng chung, kết quả được chèn vào trường \texttt{"sig"}. Sau đó, toàn bộ nội dung được mã hóa bằng AES-128 ở chế độ CBC.
+
+Do kênh UART sử dụng truyền dữ liệu dạng ký tự, dữ liệu nhị phân sau mã hóa được chuyển sang Base64 nhằm đảm bảo truyền ổn định.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Quy trình đóng gói và bảo mật dữ liệu trước khi truyền LoRa,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Tiến trình Đóng_gói_và_Truyền_Dữ_liệu(localData):
+
+  // --- 0. Đồng bộ truyền ---
+  slot_delay = Tinh_toan_time_slot(node_id)
+  Đợi(slot_delay)
+
+  // --- 1. Kiểm tra dữ liệu ---
+  Nếu nhiệt độ lỗi → -999
+  Nếu độ ẩm lỗi → -999
+  Nếu gia tốc lỗi → -999
+
+  Đọc:
+    ánh sáng
+    trạng thái tamper
+
+  // --- 2. Tạo JSON ---
+  json = {
+    vehicle_id,
+    timestamp,
+    nhiệt độ,
+    độ ẩm,
+    gia tốc,
+    ánh sáng,
+    tamper,
+    GPS
+  }
+
+  // --- 3. Xác thực ---
+  chữ_ký = HMAC_SHA256(json, SECRET_KEY)
+  json_signed = thêm chữ_ký vào json
+
+  // --- 4. Mã hóa ---
+  encrypted = AES_128_CBC(json_signed, KEY, IV)
+
+  // --- 5. Encode ---
+  payload = Base64(encrypted)
+
+  // --- 6. Gửi UART ---
+  Nếu payload hợp lệ:
+    UART_Send(payload + '\n')
+  Ngược lại:
+    Bỏ gói
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Truyền thông vô tuyến LoRa tại Node TX}
+
+\subsubsection{Giao tiếp UART giữa ESP32 và module LoRa}
+
+ESP32 giao tiếp với module LoRa thông qua UART với cấu hình 115200 bps, chế độ 8N1. Dữ liệu được gửi dưới dạng chuỗi Base64, mỗi gói kết thúc bằng ký tự \texttt{\textbackslash n}.
+
+Phía module LoRa thực hiện đọc dữ liệu theo từng byte và lưu vào bộ đệm. Khi nhận được ký tự kết thúc dòng, hệ thống xác định một gói hoàn chỉnh để xử lý. Các gói vượt quá kích thước cho phép sẽ bị loại bỏ nhằm tránh tràn bộ đệm.
+
+Firmware trên module LoRa được lập trình trực tiếp bằng ngôn ngữ C, không sử dụng AT Command, nhằm kiểm soát toàn bộ luồng dữ liệu.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Nhận dữ liệu từ ESP32 qua UART,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán UART_Nhan_Du_Lieu():
+
+  buffer ← rỗng
+
+  Lặp liên tục:
+
+    Nếu UART có dữ liệu:
+
+      byte ← đọc 1 byte
+
+      Nếu byte == '\n':
+
+        Nếu buffer không rỗng:
+          trả về buffer (1 gói hoàn chỉnh)
+
+        reset buffer
+
+      Ngược lại:
+
+        Nếu buffer chưa đầy:
+          thêm byte vào buffer
+        Ngược lại:
+          reset buffer (tránh overflow)
+
+  Nếu timeout:
+    trả về NULL
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Cấu hình tham số vật lý LoRa}
+
+Module LoRa được cấu hình hoạt động theo băng tần khu vực (AS923 hoặc 915MHz). Hệ thống sử dụng Spreading Factor 7 (SF7) để cân bằng giữa tốc độ truyền và khoảng cách liên lạc. Công suất phát được thiết lập ở mức 14 dBm.
+
+Các tham số như bandwidth, coding rate và preamble được cấu hình trong quá trình khởi tạo radio. Sau khi khởi tạo, hệ thống đăng ký các callback sự kiện (TX\_DONE, RX\_DONE, RX\_TIMEOUT, RX\_ERROR) và duy trì vòng lặp xử lý chính.
 
 
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Khởi tạo Radio và vòng lặp xử lý chính,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Tiến trình Khoi_tao_LoRa_He_thong:
 
+  // --- 1. Khởi tạo định danh thiết bị ---
+  doc Chip_ID tu phan cung
+  LOCAL_NODE_ID = Ham_anh_xa(Chip_ID)
 
-% --------------------------------------------------------- %
+  // --- 2. Cấu hình Radio ---
+  Radio_Init()
 
-\subsubsection{Kết quả thực nghiệm (Experimental Findings)}
+  Radio_Set_Tan_so(RF_FREQUENCY)
+  Radio_Set_Cong_suat(TX_POWER)
 
-Dựa trên quá trình chạy kiểm thử và đối chiếu, các thuật toán thể hiện những đặc điểm tính chất khác nhau trên tập dữ liệu cảm biến:
+  Neu su dung LoRa:
+    Cau_hinh:
+      Spreading_Factor = SF7
+      Bandwidth
+      Coding_Rate
+      Preamble_Length
+  Nguoc_lai (FSK):
+    Cau_hinh tham so FSK
 
-\begin{itemize}
-    \item \textbf{kNN Outlier:}
-    \begin{itemize}
-        \item \textit{Ưu điểm:} Cấu trúc đơn giản, tính trực quan cao và dễ giải thích. Đặc biệt nhạy bén với các điểm bất thường cục bộ.
-        \item \textit{Nhược điểm:} Thời gian tính toán tăng tỉ lệ thuận với kích thước dữ liệu (do phải quét khoảng cách tới tất cả láng giềng) và phụ thuộc nhiều vào việc chọn tham số $k$.
-    \end{itemize}
-    \item \textbf{Mahalanobis Distance:}
-    \begin{itemize}
-        \item \textit{Ưu điểm:} Tốc độ tính toán cực kỳ nhanh chóng. Hiệu năng phân loại xuất sắc nếu tập dữ liệu bình thường có xu hướng bám theo phân phối chuẩn (Gaussian).
-        \item \textit{Nhược điểm:} Yêu cầu ma trận hiệp phương sai phải khả nghịch và giảm hiệu quả nếu phân bố dữ liệu quá phức tạp hoặc chứa nhiều nhiễu cục bộ.
-    \end{itemize}
-    \item \textbf{Isolation Forest:}
-    \begin{itemize}
-        \item \textit{Ưu điểm:} Hoạt động tốt trong môi trường dữ liệu nhiễu cao, không yêu cầu giả định về hình dáng phân phối của dữ liệu gốc.
-        \item \textit{Nhược điểm:} Độ nhạy (Recall) bị ảnh hưởng mạnh bởi việc cấu hình sai tham số mức độ nhiễm bẩn (\texttt{contamination}).
-    \end{itemize}
-\end{itemize}
+  // --- 3. Gán callback sự kiện ---
+  Dang_ky_su_kien:
+    TX_DONE
+    RX_DONE
+    RX_TIMEOUT
+    RX_ERROR
 
-\vspace{0.3cm}
-\paragraph{Các chỉ số đánh giá (Evaluation Metrics)}
+  // --- 4. Khởi tạo UART ---
+  UART_Init(baudrate = 115200, che_do = 8N1)
 
-Để làm cơ sở phân tích kết quả, các chỉ số đánh giá hiệu năng mô hình trong các bảng thống kê được định nghĩa cụ thể như sau:
-\begin{itemize}
-    \item \textbf{Độ chính xác tổng thể (Accuracy):} Tỷ lệ số mẫu được dự đoán đúng trên tổng số mẫu của tập dữ liệu kiểm thử.
-    \item \textbf{Độ chuẩn xác (Precision):} Tỷ lệ sự cố thực sự trên tổng số các cảnh báo mà hệ thống phát ra. Precision cao đồng nghĩa với việc hệ thống rất ít khi phát báo động giả (False Alarm).
-    \item \textbf{Độ nhạy (Recall):} Tỷ lệ sự cố hệ thống bắt được trên tổng số sự cố thực tế xảy ra. Đối với hệ thống giám sát an toàn đạn dược, Recall là chỉ số quan trọng nhất để đảm bảo tuyệt đối không "bỏ lọt" các hành vi đập phá nguy hiểm.
-    \item \textbf{Điểm F1 (F1-score):} Là trung bình điều hòa giữa Precision và Recall, giúp đánh giá độ hiệu quả tổng thể của thuật toán trên tập dữ liệu bị mất cân bằng (số lượng mẫu Normal áp đảo mẫu Anomaly).
-    \item \textbf{Ngưỡng phân loại (Threshold):} Giá trị ranh giới được thuật toán tính toán để quyết định một mẫu dữ liệu đầu vào là Bình thường hay Dị thường.
-\end{itemize}
+  // --- 5. Khởi tạo bộ theo dõi sequence ---
+  Khoi_tao_seq_tracker()
 
-\paragraph{Bảng Tổng hợp Chỉ số Hiệu năng}
+  // --- 6. Bắt đầu chế độ nhận ---
+  Radio_Bat_dau_RX(timeout)
 
-Kết quả đo lường định lượng trên tập Test (tổng cộng 7.800 mẫu và Test set chiếm 30\% tổng dữ liệu) được trình bày trong hai bảng sau.
+--------------------------------------------------
+
+Vòng lặp chính He_thong:
+
+  Lặp vô hạn:
+
+    Xu_ly_ngat_Radio()
+
+    // --- Đọc dữ liệu từ ESP32 qua UART ---
+    json_line = UART_Nhan_Du_Lieu()
+
+    Neu json_line hop_le:
+
+      Neu do_dai <= NGUONG_TOI_DA:
+
+        Goi:
+          Gui_Goi_Tin_Vo_Tuyen(json_line)
+
+      Nguoc_lai:
+        Bo_goi (tranh tran bo dem)
+
+    Nguoc_lai:
+      Tiep_tuc_cho_du_lieu
+
+--------------------------------------------------
+
+Su kien TX_DONE:
+  Chuyen Radio ve che do Sleep
+  Danh dau hoan thanh truyen
+
+Su kien RX_DONE:
+  Luu payload vao bo dem
+  Cap nhat RSSI, SNR
+
+Su kien RX_TIMEOUT / RX_ERROR:
+  Dua Radio ve trang thai san sang
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Cơ chế đóng khung dữ liệu và Auth Tag}
+
+Tại tầng truyền dẫn, mỗi payload được đóng gói thành một khung dữ liệu ở mức byte với cấu trúc gồm: Node ID, Sequence Number, Payload Length, Payload và Auth Tag.
 
 \begin{table}[H]
     \centering
-    \caption{So sánh tốc độ suy luận và độ chính xác tổng thể của các thuật toán}
-    \label{tab:performance_speed}
+    \caption{Cấu trúc khung truyền vô tuyến (Radio Frame)}
     \renewcommand{\arraystretch}{1.3}
-    \begin{tabular}{|l|c|c|c|c|}
+    \begin{tabular}{|c|c|c|c|c|}
         \hline
-        \textbf{Thuật toán} & \textbf{Threshold} & \textbf{Accuracy} & \textbf{Correct} & \textbf{Thời gian (ms)} \\
+        Node ID & Sequence Number & Payload Length & Payload & Auth Tag \\
         \hline
-        kNN Outlier & 0.2283 & 0.9846 & 7.680 / 7.800 & 0.02 \\
-        Mahalanobis & 2.7081 & 0.9538 & 7.440 / 7.800 & 0.01 \\
-        Isolation Forest & -0.0142 & 0.8035 & 6.267 / 7.800 & 0.01 \\
+        1 byte & 4 bytes & 2 bytes & $L$ bytes & 2 bytes \\
         \hline
     \end{tabular}
 \end{table}
 
-\begin{table}[H]
-    \centering
-    \caption{So sánh chỉ số phân loại chi tiết của các thuật toán}
-    \label{tab:performance_quality}
-    \renewcommand{\arraystretch}{1.3}
-    \begin{tabular}{|l|c|c|c|}
-        \hline
-        \textbf{Thuật toán} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-score} \\
-        \hline
-        kNN Outlier & 0.9444 & 0.9917 & 0.9675 \\
-        Mahalanobis & 0.8492 & 0.9728 & 0.9068 \\
-        Isolation Forest & 0.7459 & 0.2250 & 0.3457 \\
-        \hline
-    \end{tabular}
-\end{table}
+Node ID được ánh xạ từ mã định danh phần cứng. Sequence Number được tăng tuần tự theo từng gói để đảm bảo tính duy nhất và hỗ trợ phát hiện gói lặp.
 
-\paragraph{Nhận xét}
-Dựa vào các chỉ số từ 2 Bảng trên, ta có thể rút ra các kết luận định hướng triển khai như sau:
+Payload chứa dữ liệu Base64 từ ESP32. Độ dài payload được kiểm soát để phù hợp với bộ đệm và cấu hình truyền.
+
+Auth Tag được tính bằng CRC16 trên dữ liệu kết hợp giữa khóa bí mật, Node ID, Sequence Number và payload. Cơ chế này cho phép phát hiện sai lệch dữ liệu và loại bỏ các gói không hợp lệ trước khi xử lý sâu hơn tại Gateway.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Cơ chế đóng khung vật lý và truyền gói tin,
+    arc=4pt,
+    boxrule=1pt,
+    breakable,
+    left=5pt, right=5pt, top=5pt, bottom=5pt
+]
+\begin{verbatim}
+Thuật toán Gui_Goi_Tin_Vo_Tuyen(payload, do_dai):
+
+  // --- 0. Kiểm tra an toàn ---
+  Neu do_dai > NGUONG_TOI_DA:
+    Ket thuc (tránh tràn bộ đệm)
+
+  packet ← rỗng
+
+  // Lưu sequence hiện tại
+  current_seq ← So_thu_tu_hien_tai
+
+  // --- 1. Header ---
+  Thêm NODE_ID vào packet
+
+  Thêm current_seq (4 byte) vào packet
+
+  Tăng So_thu_tu_hien_tai lên 1
+
+  Thêm do_dai payload (2 byte) vào packet
+
+  // --- 2. Payload ---
+  Thêm payload vào packet
+
+  // --- 3. Tính Auth Tag ---
+  du_lieu_xac_thuc ← Nối(
+      SECRET_KEY,
+      NODE_ID,
+      current_seq,
+      payload
+  )
+
+  auth_tag ← CRC16(du_lieu_xac_thuc)
+
+  Thêm auth_tag (2 byte) vào cuối packet
+
+  // --- 4. Truyền ---
+  chieu_dai_tong ← Độ_dài(packet)
+
+  Radio_Send(packet, chieu_dai_tong)
+
+  Đợi sự kiện TX_DONE từ phần cứng
+\end{verbatim}
+\end{tcolorbox}
+
+\section{Hiện thực hóa Firmware cho Xe chỉ huy (Node RX - Gateway)}
+
+\subsection{Tầng thu nhận vô tuyến và kiểm soát an ninh trên module LoRa RA-08H}
+
+\subsubsection{Tiếp nhận gói tin vô tuyến và lưu bộ đệm}
+
+Trong hệ thống, module LoRa RA-08H được cấu hình hoạt động ở chế độ nhận liên tục để thu các gói tin từ các Node TX. Khi có dữ liệu đến, module sẽ phát sinh ngắt RX\_DONE để báo cho hệ thống biết rằng một gói tin đã được nhận hoàn chỉnh.
+
+Tại thời điểm này, payload sẽ được đọc trực tiếp từ bộ đệm của radio và sao chép vào vùng nhớ RAM (LoraBuf). Đồng thời, các thông tin đi kèm như RSSI và SNR cũng được lưu lại để phục vụ cho việc theo dõi chất lượng truyền.
+
+Để đảm bảo an toàn bộ nhớ, hệ thống kiểm tra kích thước gói tin trước khi sao chép. Nếu kích thước vượt quá giới hạn cho phép, dữ liệu sẽ bị cắt bớt để tránh tràn buffer.
+
+Sau khi hoàn tất bước này, hệ thống chuyển sang trạng thái RX để tiếp tục xử lý ở các tầng phía trên.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Tiếp nhận và lưu bộ đệm gói tin vô tuyến,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Sự kiện RX_DONE(payload, size, rssi, snr):
+
+  Đưa Radio về trạng thái nghỉ
+
+  Nếu size > BUFFER_MAX:
+    size = BUFFER_MAX
+
+  Sao chép payload → bộ đệm LoraBuf
+  Lưu độ dài → LoraLen
+
+  Lưu:
+    RssiValue = rssi
+    SnrValue  = snr
+
+  Chuyển trạng thái hệ thống → RX
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Cơ chế lọc gói tin và xác thực Auth Tag}
+
+Sau khi nhận được dữ liệu thô từ radio, hệ thống tiến hành phân tích cấu trúc gói tin theo định dạng đã thiết kế. Các trường bao gồm node\_id, sequence number, payload và auth tag được trích xuất trực tiếp từ chuỗi byte.
+
+Trước tiên, hệ thống kiểm tra độ dài tối thiểu của gói tin. Nếu không đủ điều kiện, gói tin sẽ bị loại bỏ ngay mà không xử lý thêm.
+
+Tiếp theo, Auth Tag được tính lại bằng CRC16 dựa trên secret key, node\_id, sequence và payload. Giá trị này được so sánh với auth tag nhận được trong gói tin.
+
+Nếu hai giá trị không trùng nhau, gói tin bị xem là không hợp lệ và bị loại bỏ. Ngược lại, gói tin được chấp nhận để chuyển sang bước kiểm tra tiếp theo.
+
+Cách làm này giúp loại bỏ sớm các gói tin sai mà không cần thực hiện các bước xử lý nặng như giải mã AES.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Phân tích và xác thực gói tin,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán Phan_tich_va_Xac_thuc(raw_packet):
+
+  Nếu độ dài < kích thước tối thiểu:
+    Loại bỏ (Packet quá nhỏ)
+
+  Đọc:
+    node_id
+    sequence_number
+    payload_length
+
+  Nếu payload_length không hợp lệ:
+    Loại bỏ
+
+  Trích xuất:
+    payload
+    auth_tag
+
+  Tính lại:
+    expected_tag = CRC16(SECRET_KEY + node_id + seq + payload)
+
+  Nếu expected_tag != auth_tag:
+    Loại bỏ (AUTH FAIL)
+
+  Ngược lại:
+    Gói tin hợp lệ bước 1
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Thuật toán Sliding Window chống phát lại}
+
+Sau khi vượt qua bước kiểm tra Auth Tag, hệ thống tiếp tục kiểm tra sequence number để phát hiện replay attack.
+
+Mỗi node sẽ có một trạng thái riêng bao gồm last\_seq và một bitmap đại diện cho cửa sổ trượt. Khi một gói tin mới đến, hệ thống so sánh giá trị sequence với last\_seq hiện tại.
+
+Nếu sequence lớn hơn, cửa sổ sẽ được dịch lên tương ứng và cập nhật lại bitmap. Nếu sequence nhỏ hơn, hệ thống kiểm tra xem gói tin đó đã từng xuất hiện trong cửa sổ hay chưa.
+
+Nếu đã tồn tại hoặc nằm ngoài phạm vi cửa sổ, gói tin sẽ bị loại bỏ. Ngược lại, gói tin vẫn được chấp nhận.
+
+Cơ chế này giúp hệ thống vừa chống replay, vừa vẫn chấp nhận mất gói trong môi trường LoRa.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Kiểm tra chống phát lại bằng Sliding Window,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán Kiem_tra_Sequence(node, seq):
+
+  Nếu node chưa tồn tại:
+    Tạo node mới
+    Lưu seq làm last_seq
+    bitmap = 1
+    Chấp nhận gói tin
+
+  Nếu seq > last_seq:
+
+    shift = seq - last_seq
+
+    Nếu shift > WINDOW_SIZE:
+      Loại bỏ (Jump quá lớn)
+
+    Dịch bitmap sang trái shift bit
+    Đặt bit mới = 1
+
+    Cập nhật last_seq = seq
+    Chấp nhận
+
+  Ngược lại:
+
+    diff = last_seq - seq
+
+    Nếu diff >= WINDOW_SIZE:
+      Loại bỏ (Quá cũ)
+
+    Nếu bit tại vị trí diff đã = 1:
+      Loại bỏ (Replay)
+
+    Đặt bit tương ứng = 1
+    Chấp nhận
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Quản lý trạng thái theo từng Node}
+
+Để hỗ trợ cơ chế chống phát lại, hệ thống duy trì một danh sách các node đang hoạt động. Mỗi node được lưu dưới dạng một cấu trúc riêng, bao gồm node\_id, last\_seq và bitmap.
+
+Khi nhận gói tin mới, hệ thống sẽ tìm node tương ứng. Nếu chưa tồn tại, một node mới sẽ được tạo nếu chưa vượt quá giới hạn cho phép.
+
+Trường hợp số lượng node đã đạt ngưỡng tối đa, hệ thống sẽ từ chối xử lý gói tin mới để đảm bảo không vượt quá tài nguyên bộ nhớ.
+
+Cách quản lý này cho phép gateway xử lý đồng thời nhiều node mà vẫn giữ được trạng thái độc lập cho từng thiết bị.
+
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Quản lý danh sách Node,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán Lay_hoac_Tao_Node(node_id):
+
+  Với mỗi node trong danh sách:
+    Nếu trùng node_id:
+      Trả về node
+
+  Nếu chưa vượt MAX_NODES:
+    Tạo node mới
+    Khởi tạo trạng thái
+    Thêm vào danh sách
+    Trả về node
+
+  Ngược lại:
+    Trả về NULL (quá số node)
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Tầng xử lý dữ liệu và điều phối trên vi điều khiển ESP32}
+
+\subsubsection{Tiếp nhận dữ liệu từ module LoRa qua UART}
+
+ESP32 nhận dữ liệu từ module LoRa thông qua UART dưới dạng chuỗi ký tự. Dữ liệu được gửi theo từng dòng, vì vậy hệ thống triển khai cơ chế đọc theo line (kết thúc bằng ký tự \texttt{\textbackslash n}).
+
+Trong quá trình đọc, hệ thống xử lý trực tiếp các trường hợp như:
 \begin{itemize}
-    \item Thuật toán \textbf{kNN Outlier} tỏ ra vượt trội nhất về khả năng phân loại tổng thể, đạt Accuracy cao nhất (98.46\%) cùng chỉ số F1-score (96.75\%) và ROC AUC (0.9972) gần như tuyệt đối. Mặc dù thời gian suy luận (0.02 ms) có nhỉnh hơn các phương pháp khác, nhưng với tốc độ này, kNN vẫn hoàn toàn đáp ứng tốt cho hệ thống IoT quy mô nhỏ đến vừa.
-    \item Thuật toán \textbf{Mahalanobis Distance} là một giải pháp cân bằng tuyệt vời. Với thời gian suy luận cực thấp (chỉ 0.01 ms cho một mẫu) trong khi vẫn duy trì được Recall rất cao (97.28\%), đây là ứng cử viên sáng giá nhất để nhúng trực tiếp vào các thiết bị Edge Gateway có tài nguyên tính toán hạn hẹp nhưng đòi hỏi cảnh báo sự cố tức thời.
-    \item \textbf{Isolation Forest} ghi nhận kết quả khá thấp ở chỉ số Recall (22.50\%) với ngưỡng hiện tại. Điều này cho thấy mô hình đang bỏ sót khá nhiều điểm bất thường thực sự. Để cải thiện hiệu năng của Isolation Forest trong kiến trúc này, cần thiết lập lại kỹ thuật dò tìm siêu tham số (Hyperparameter tuning) hoặc ứng dụng cơ chế học tập hợp (Ensemble Learning) trước khi triển khai thực tế.
+    \item dòng metadata dạng \texttt{[RX OK]}
+    \item dòng payload (Base64 hoặc JSON)
+    \item các dòng log không liên quan sẽ bị bỏ qua
 \end{itemize}
 
-\subsubsection{Tiểu kết và Đề xuất giải pháp}
+Đối với metadata, hệ thống sẽ chờ thêm một dòng payload đi kèm trong một khoảng thời gian ngắn. Nếu không nhận đủ dữ liệu, gói tin sẽ bị bỏ.
 
-\paragraph{Tóm tắt kết quả đánh giá}
-Qua quá trình thực nghiệm, phân hệ đã hoàn thiện quy trình đánh giá chéo ba thuật toán học máy trong bài toán phát hiện bất thường đa biến. Việc trực quan hóa không gian dữ liệu và phân tích các chỉ số định lượng (ROC AUC, F1-score) đã làm nổi bật rõ ưu và nhược điểm của từng phương pháp. Mặc dù bộ dữ liệu thử nghiệm hiện tại đang ở quy mô trung bình và chưa được kiểm chứng trên các cụm máy chủ phân tán lớn (large-scale clusters), các kết quả thu được đã tạo tiền đề vững chắc cho việc thiết kế logic cảnh báo của hệ thống.
+Sau khi ghép hoàn chỉnh, chuỗi dữ liệu được chuyển sang bước xử lý payload.
 
-\paragraph{Lựa chọn giải pháp cốt lõi}
-Dựa trên các phân tích toàn diện, \textbf{k-Nearest Neighbors (kNN) Outlier} được lựa chọn làm giải pháp hạt nhân cho module phát hiện bất thường trong phạm vi đồ án này. Quyết định này được đưa ra dựa trên các luận điểm sau:
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Đọc dữ liệu từ UART và ghép gói RX,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán UART_Doc_Goi_RX():
+
+  Lặp liên tục:
+
+    Nếu UART có dữ liệu:
+
+      dong1 ← đọc đến '\n'
+      loại bỏ khoảng trắng
+
+      Nếu dong1 rỗng:
+        tiếp tục
+
+      Nếu dong1 bắt đầu bằng "[RX OK]":
+
+        bat_dau_dem_thoi_gian
+
+        Trong khi chưa timeout:
+
+          Nếu có dữ liệu:
+            dong2 ← đọc đến '\n'
+            nếu dong2 hợp lệ:
+              return dong1 + dong2
+
+        // Không đủ payload → bỏ gói
+        tiếp tục
+
+      Nếu dong1 là JSON hoặc Base64:
+        return dong1
+
+      Ngược lại:
+        bỏ qua (log không liên quan)
+
+  return NULL nếu không có dữ liệu
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Giải mã đa lớp và bóc tách dữ liệu}
+
+Payload sau khi nhận sẽ được xử lý theo đúng thứ tự pipeline đã thiết kế.
+
+Trước tiên, hệ thống kiểm tra định dạng. Nếu payload là Base64, dữ liệu sẽ được decode và giải mã AES-CBC để thu lại JSON gốc. Nếu đã là JSON thì bỏ qua bước này.
+
+Tiếp theo là bước xác thực HMAC. ESP32 sẽ tách trường \texttt{sig}, sau đó tính lại HMAC trên phần dữ liệu còn lại. Nếu không khớp, gói tin bị loại bỏ ngay.
+
+Chỉ khi vượt qua bước này, payload mới được parse JSON để lấy các trường telemetry như nhiệt độ, độ ẩm, gia tốc và GPS.
+
+Cách triển khai theo thứ tự này giúp tránh xử lý sâu đối với dữ liệu không hợp lệ.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Xử lý giải mã và xác thực dữ liệu,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán Xu_ly_Payload(payload):
+
+  // --- BƯỚC 1: Giải mã ---
+  Nếu payload không phải JSON:
+
+    Nếu payload hợp lệ Base64:
+      du_lieu_ma_hoa ← decode Base64
+      payload ← giai_ma_AES(du_lieu_ma_hoa)
+    Ngược lại:
+      return lỗi
+
+  // --- BƯỚC 2: Xác thực chữ ký ---
+  doc ← parse JSON(payload)
+
+  Nếu không tồn tại "sig":
+    return lỗi
+
+  signature ← doc["sig"]
+  xóa trường "sig" khỏi doc
+
+  raw_data ← tái tạo JSON theo format chuẩn
+
+  expected_sig ← HMAC_SHA256(raw_data)
+
+  Nếu expected_sig != signature:
+    return lỗi
+
+  // --- BƯỚC 3: Parse dữ liệu ---
+  telemetry ← trích xuất các trường:
+    vehicle_id, temp, humidity, accel, gps, ...
+
+  Nếu dữ liệu không hợp lệ:
+    return lỗi
+
+  return telemetry
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Triển khai hàng đợi lưu trữ và đẩy bù dữ liệu}
+
+Trong quá trình vận hành, kết nối MQTT có thể bị gián đoạn. Để tránh mất dữ liệu, hệ thống triển khai một hàng đợi lưu tạm trên ESP32.
+
+Khi không thể publish ngay, dữ liệu sẽ được đưa vào hàng đợi thay vì gửi trực tiếp. Hàng đợi này được lưu xuống SPIFFS để đảm bảo không mất khi reset.
+
+Khi kết nối được khôi phục, hệ thống sẽ gửi lại dữ liệu theo từng đợt nhỏ, kết hợp với giới hạn tốc độ để tránh gây quá tải.
+
+Ngoài ra, hệ thống còn áp dụng cơ chế ưu tiên để đảm bảo các gói telemetry quan trọng được gửi trước.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:},
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán enqueuePendingPublish(msg):
+    nếu priority = LOW và queue_size > PRESSURE_THRESHOLD:
+        bỏ qua gói tin
+    nếu queue_size < MAX_SIZE:
+        đưa msg vào priority_queue
+        tăng biến dirty_count
+        kích hoạt lưu xuống flash (deferred)
+\end{verbatim}
+\end{tcolorbox}
+
+\paragraph{Lưu trữ bền vững trên SPIFFS}
+
+Để đảm bảo dữ liệu không bị mất khi thiết bị reset, hàng đợi được lưu xuống bộ nhớ flash (SPIFFS) dưới dạng JSON. Tuy nhiên, để giảm số lần ghi flash, hệ thống sử dụng cơ chế ghi trì hoãn (deferred save):
+
 \begin{itemize}
-    \item \textbf{Hiệu năng vượt trội:} kNN Outlier chứng minh sự phù hợp tuyệt đối với dữ liệu cảm biến vật lý (nhiệt độ, độ ẩm, độ rung) khi đạt được độ chính xác (Accuracy) và điểm F1 cao nhất trong số các thuật toán được thử nghiệm.
-    \item \textbf{Đáp ứng thời gian thực:} Mặc dù có độ phức tạp tính toán phụ thuộc vào số lượng mẫu, thời gian suy luận thực tế (0.02 ms/mẫu) trên quy mô dữ liệu vừa phải vẫn hoàn toàn đáp ứng được yêu cầu cảnh báo độ trễ thấp của hệ thống IoT.
+    \item Chỉ lưu khi đạt ngưỡng số gói tin thay đổi
+    \item Hoặc sau một khoảng thời gian định trước
 \end{itemize}
 
-\paragraph{Định hướng cho các phân hệ tiếp theo}
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:},
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán saveQueueDeferred():
+    nếu chưa đến thời gian lưu và dirty_count < threshold:
+        return
+    serialize toàn bộ queue -> JSON
+    ghi vào file SPIFFS
+    reset dirty_count
+\end{verbatim}
+\end{tcolorbox}
 
-Mặc dù quá trình thực nghiệm và đánh giá thuật toán vừa trình bày được thực hiện trên không gian đặc trưng ba chiều ($d=3$ gồm nhiệt độ, độ ẩm và độ rung), bản chất toán học của thuật toán kNN Outlier không bị ràng buộc cố định bởi số chiều của dữ liệu. Đặc tính linh hoạt này cho phép hệ thống dễ dàng mở rộng từ việc giám sát các thông số cơ khí đơn thuần sang một kiến trúc toàn diện hơn: \textbf{Phát hiện bất thường đa phương thức (Multi-modal Anomaly Detection)}.
+Khi thiết bị khởi động lại và có kết nối WiFi, hàng đợi sẽ được nạp lại từ SPIFFS để tiếp tục quá trình gửi.
 
-Với việc xác định kNN Outlier là giải pháp hạt nhân, nội dung tiếp theo của đồ án sẽ tập trung vào việc đóng gói mô hình (Model Deployment) và triển khai luồng suy luận trực tiếp trên thiết bị biên (Edge ML Inference). Hệ thống xử lý tại Gateway sẽ được thiết kế thành một kiến trúc AI đa tầng, áp dụng lại chính logic của thuật toán kNN để giám sát song song ba phân hệ dữ liệu:
+\paragraph{Cơ chế đẩy bù (flush queue)}
+
+Khi MQTT được kết nối lại, hệ thống sẽ tiến hành gửi lại các gói tin trong hàng đợi theo từng đợt nhỏ nhằm tránh làm nghẽn mạng hoặc gây reset watchdog.
+
 \begin{itemize}
-    \item \textbf{Phân hệ Vật lý ($d=3$):} Giám sát nhiệt độ, độ ẩm và độ rung (đã tinh chỉnh ngưỡng) để phát hiện các tác động cơ học và môi trường lên đạn dược.
-    \item \textbf{Phân hệ Vô tuyến RF ($d=2$):} Ứng dụng kNN trên dữ liệu RSSI và SNR để phát hiện các điểm mù sóng hoặc các hành vi tấn công gây nhiễu tín hiệu (Jamming Attack) có chủ đích.
-\end{itemize}
-Cách tiếp cận đồng nhất một thuật toán (kNN) cho nhiều phương thức dữ liệu không chỉ giúp tối ưu hóa không gian bộ nhớ (ROM) trên vi điều khiển ESP32, mà còn tạo ra một hệ thống giám sát vận chuyển IoBT (Internet of Battlefield Things) có độ tin cậy và tính bảo mật cực kỳ cao.
-
-\subsection{Triển khai hệ thống phát hiện dị thường vật lý trên thiết bị biên}
-
-\subsubsection{Giới thiệu chung và Phân tích đặc trưng dữ liệu}
-
-Sau khi xác định thuật toán k-Nearest Neighbors (kNN) Outlier là giải pháp phù hợp nhất qua các bước đánh giá lý thuyết, nhóm tiến hành hiện thực hóa mô hình vào hệ thống thực tế. Thay vì đẩy toàn bộ dữ liệu viễn trắc thô lên máy chủ đám mây (Cloud) như trong các kiến trúc IoT truyền thống — vốn tiềm ẩn rủi ro về độ trễ (latency), tiêu tốn băng thông và phụ thuộc hoàn toàn vào kết nối mạng — nhóm đề xuất phương pháp triển khai mô hình trực tiếp lên thiết bị biên (ESP32 Gateway). Việc áp dụng kiến trúc \textit{Suy luận máy học tại biên (Edge ML Inference)} giúp thiết bị có khả năng tự trị trong việc phân tích và chỉ truyền tải các bản tin cảnh báo khi thực sự có sự cố.
-
-Tuy nhiên, việc ánh xạ một mô hình học máy từ môi trường Python (chạy trên máy tính cá nhân) sang ngôn ngữ C/C++ thuần túy trên hệ thống nhúng đặt ra những giới hạn khắt khe về mặt tài nguyên: không gian lưu trữ (ROM/RAM) cực kỳ hạn hẹp, xung nhịp vi xử lý thấp (chỉ 240 MHz) và những rủi ro về sai số khi tính toán dấu phẩy động (Floating-point) ở cấp độ phần cứng.
-
-\subsubsection{Tối ưu hóa mô hình và Tiền xử lý dữ liệu}
-
-Bản chất của thuật toán kNN là "học lười" (Lazy Learning), đòi hỏi thiết bị phải đối chiếu dữ liệu mới với toàn bộ tập dữ liệu mẫu trong mỗi chu kỳ suy luận. Việc nạp trực tiếp tập dữ liệu huấn luyện gồm 20.000 mẫu vào bộ nhớ của ESP32 là bất khả thi và sẽ gây ra lỗi tràn bộ nhớ (Out of Memory). Để giải quyết bài toán này, nhóm đã áp dụng ba kỹ thuật tối ưu hóa sau:
-
-\textbf{1. Giảm thiểu không gian mẫu bằng phân cụm K-means (Model Pruning):} \\
-Thay vì lưu trữ toàn bộ dữ liệu gốc, nhóm sử dụng thuật toán K-means Clustering trên Python để trích xuất ra 200 điểm trung tâm. Quá trình này tạo ra 200 "mẫu đại diện", giúp thu gọn khối lượng tính toán và không gian lưu trữ xuống 100 lần. Dung lượng mô hình sau khi nén chỉ còn 2.4 KB cho mỗi xe tải, hoàn toàn phù hợp để lưu trữ cố định trong vùng nhớ PROGMEM của vi điều khiển.
-
-\textbf{2. Lựa chọn phương pháp tính toán khoảng cách:} \\
-Nhóm quyết định giữ nguyên công thức khoảng cách Euclid chuẩn (bao gồm phép lấy căn bậc hai) để đảm bảo tính nhất quán toán học với quá trình huấn luyện trên Python:
-$$ d(x,y) = \sqrt{\sum_{i=1}^{3}(x_i - y_i)^2} $$
-Mặc dù phép lấy căn tốn chu kỳ CPU, nhưng nhờ vi điều khiển ESP32 được tích hợp sẵn bộ đồng xử lý Floating-Point Unit (FPU), phép toán này được xử lý ở cấp độ phần cứng (hardware-accelerated). Do đó, việc giữ nguyên kiểu dữ liệu \texttt{float32} thực tế mang lại tốc độ thực thi nhanh hơn và độ chính xác cao hơn so với việc phải thực hiện các bước lượng tử hóa (quantization) phức tạp về kiểu số nguyên 16-bit.
-
-\textbf{3. Đóng gói mô hình tĩnh (Static Model Export):} \\
-Hệ thống nhúng không hỗ trợ việc đọc các định dạng mô hình động như \texttt{.pkl} (Pickle). Do đó, nhóm đã xây dựng một kịch bản (script) Python để tự động chuyển đổi 200 mẫu đại diện cùng các tham số chuẩn hóa Min-Max thành một mảng cấu trúc hằng số (constant array) trong ngôn ngữ C/C++ (\texttt{training\_data.h}):
-
-\begin{lstlisting}[language=C++, caption=Cấu trúc lưu trữ dữ liệu huấn luyện trên Flash Memory của ESP32]
-struct TrainingPacket {
-    float temperature;
-    float humidity;
-    float accel_magnitude;
-};
-// Luu tru cac tham so huan luyen vao vung nho Flash de toi uu RAM
-constexpr std::array<TrainingPacket, 200> TRAINING_DATA = { {
-    {22.21, 47.42, 1.37},   // Mau dai dien 1
-    {23.15, 51.70, 2.22},   // Mau dai dien 2
-    // ... 198 mau tiep theo
-} };
-\end{lstlisting}
-
-\subsubsection{Thiết kế phần mềm suy luận trên vi điều khiển ESP32}
-
-Để đảm bảo tính tổ chức mã nguồn và dễ dàng mở rộng khi hệ thống quản lý nhiều xe cùng lúc, thuật toán suy luận được nhóm trừu tượng hóa thành lớp đối tượng (Class) \texttt{kNNAnomalyDetector} bằng ngôn ngữ C++. Lớp này đóng gói toàn bộ quy trình xử lý, bao gồm các phương thức lõi:
-\begin{itemize}
-    \item \texttt{normalizeData(x)}: Chuẩn hóa vector dữ liệu thô đầu vào về thang đo [0, 1] dựa trên các hệ số Min-Max Scaler đã được trích xuất từ tập huấn luyện. Lệnh giới hạn (\texttt{clamp}) được sử dụng để ngăn ngừa sai số tràn viền.
-    \item \texttt{distance(x, sample)}: Tính toán khoảng cách Euclid từ điểm dữ liệu hiện tại tới từng mẫu đại diện trong tập \texttt{TRAINING\_DATA}.
-    \item \texttt{getAnomalyScore(x)}: Thực hiện thuật toán sắp xếp cục bộ để lọc ra $k=5$ khoảng cách nhỏ nhất, sau đó tính trung bình cộng để cho ra điểm số dị thường.
-    \item \texttt{classify(score)}: So sánh điểm số vừa tính toán với ngưỡng cảnh báo (\texttt{Threshold}) để quyết định xuất nhãn \texttt{NORMAL} hay \texttt{ANOMALY}.
+    \item Giới hạn số gói tin gửi mỗi vòng lặp
+    \item Chèn delay nhỏ giữa các lần gửi
+    \item Reset watchdog để tránh treo hệ thống
 \end{itemize}
 
-\textit{Ghi chú: Toàn bộ các biến trung gian trong quá trình tính toán đều được cấp phát tĩnh (static allocation) hoặc quản lý chặt chẽ trong bộ nhớ Stack, nhằm triệt tiêu hoàn toàn nguy cơ phân mảnh bộ nhớ (Memory Fragmentation) vốn rất dễ gây treo hệ thống khi thiết bị IoT hoạt động liên tục (24/7).}
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:},
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật toán flushPendingPublishes():
+    nếu MQTT chưa kết nối:
+        return
 
-\subsubsection{Kiến trúc luồng suy luận (Inference Pipeline)}
+    flush_count = 0
+    while queue không rỗng và flush_count < MAX_PER_LOOP:
+        lấy msg có ưu tiên cao nhất
 
-Quy trình luân chuyển và xử lý dữ liệu từ cảm biến vật lý đến khi phát sinh cảnh báo được mô tả qua các bước tuần tự sau:
+        nếu msg là LOW và queue_size > CRITICAL_THRESHOLD:
+            loại bỏ msg
+            continue
 
-\vspace{0.3cm}
-\noindent\textbf{1. Luồng truyền dẫn tín hiệu:}
+        nếu không thỏa rate limit:
+            break
+
+        nếu publish thành công:
+            pop khỏi queue
+            flush_count++
+            reset watchdog
+        ngược lại:
+            break
+\end{verbatim}
+\end{tcolorbox}
+
+\paragraph{Đảm bảo công bằng và tránh starvation}
+
+Hệ thống vẫn giữ cơ chế tránh starvation bằng cách theo dõi số lần gửi liên tiếp của cùng một mức ưu tiên. Điều này giúp đảm bảo các gói tin status không bị bỏ đói khi telemetry liên tục được sinh ra.
+
+\paragraph{Kết hợp với cơ chế giới hạn tốc độ}
+
+Hệ thống áp dụng nhiều lớp giới hạn tốc độ:
 \begin{itemize}
-    \item \textbf{[Node TX: Sensor + LoRa Module]} $\xrightarrow{\text{ LoRa }}$ \textbf{[ESP32 Gateway (RX)]}
+    \item Toàn cục (global publish interval)
+    \item Theo từng vehicle
+    \item Theo từng loại gói tin
 \end{itemize}
 
-\textit{Lưu ý: Hệ thống hỗ trợ nhiều nodes TX gửi dữ liệu đến cùng một ESP32 Gateway qua giao thức LoRa.}
+Nhờ đó, ngay cả khi flush hàng đợi, hệ thống vẫn duy trì được tính ổn định và không gây quá tải broker.
 
-\noindent\textbf{2. Luồng suy luận Edge ML (Module kNNAnomalyDetector):}
+Đây là thành phần quan trọng đảm bảo tính tin cậy của gateway trong hệ thống IoT phân tán.
+
+% ==================================================
+
+\section{Triển khai Hạ tầng trung tâm và Lưu trữ}
+
+\subsection{Hiện thực hóa trạm điều phối Mosquitto MQTT Broker và cơ chế QoS 1}
+
+Trong hệ thống, Mosquitto MQTT Broker được triển khai như một thành phần trung tâm để tiếp nhận dữ liệu từ gateway ESP32 RX và phân phối tới các thành phần xử lý phía sau. Broker hoạt động theo mô hình publish/subscribe, trong đó gateway đóng vai trò publisher và các dịch vụ backend đóng vai trò subscriber.
+
+Cấu trúc topic được thiết kế theo dạng phân cấp dựa trên \textit{vehicle_id}, giúp việc tổ chức và truy xuất dữ liệu trở nên rõ ràng. Cụ thể, các topic được sử dụng bao gồm:
 \begin{itemize}
-    \item[$\hookrightarrow$] \textit{Bước 1:} Chuẩn hóa dữ liệu thô (Min-Max Scaler).
-    \item[$\hookrightarrow$] \textit{Bước 2:} Tính khoảng cách hình học tới 200 điểm trung tâm.
-    \item[$\hookrightarrow$] \textit{Bước 3:} Xếp hạng, chọn $k=5$ láng giềng gần nhất và tính \texttt{Anomaly Score}.
-    \item[$\hookrightarrow$] \textit{Bước 4:} Áp dụng \texttt{Threshold} để phân loại trạng thái.
+\item vehicles/{vehicle_id}/telemetry
+\item vehicles/{vehicle_id}/status
+\item vehicles/{vehicle_id}/gps
 \end{itemize}
 
-\noindent\textbf{3. Luồng cảnh báo dị thường:}
-\begin{itemize}
-    \item \textbf{[ESP32 Gateway]} $\xrightarrow{\text{ Đẩy payload MQTT }}$ \textbf{[Cloud / Server Trung tâm]} \\
-\end{itemize}
+Khi ESP32 gửi dữ liệu lên broker, mỗi bản tin sẽ được publish tới đúng topic tương ứng với loại dữ liệu. Cách tổ chức này cho phép các service phía sau chỉ cần subscribe theo pattern để nhận đúng dữ liệu cần xử lý mà không cần lọc phức tạp.
 
-\noindent\textbf{* Phân rã thời gian trễ toàn trình (Latency Breakdown - Đo kiểm thực tế):} \\
-Parse (0.17ms) + kNN Inference (8.5ms) + MQTT Publish ($\sim$ 12ms) = \textbf{Tổng $\sim$ 20.7ms}
+Hệ thống sử dụng QoS 1 để đảm bảo dữ liệu được gửi ít nhất một lần. Trong quá trình thực thi, nếu broker chưa xác nhận (PUBACK), ESP32 sẽ tự động gửi lại bản tin. Điều này giúp tăng độ tin cậy trong môi trường mạng không ổn định, tuy nhiên cũng dẫn đến khả năng xuất hiện dữ liệu trùng lặp ở phía subscriber.
 
-Kết quả đo kiểm qua cổng Serial cho thấy, toàn bộ khối lượng tính toán toán học phức tạp của kNN (chuẩn hóa, đối chiếu 200 mẫu, sắp xếp, phân loại) chỉ tiêu tốn 8.5 mili-giây.
+Tại gateway, cơ chế kết nối MQTT được cài đặt theo hướng thích nghi. Trước khi thiết lập phiên MQTT, ESP32 kiểm tra kết nối WiFi và khả năng truy cập broker ở tầng TCP. Nếu không thể kết nối qua TLS (cổng 8883), hệ thống có thể chuyển sang kết nối thường (1883) nếu được cấu hình cho phép.
 
-\subsubsection{Ví dụ minh họa luồng thực thi thuật toán}
+Ngoài ra, khi kết nối thất bại, hệ thống không reconnect ngay lập tức mà sử dụng chiến lược exponential backoff kết hợp jitter để giảm tải cho broker khi nhiều thiết bị cùng reconnect.
 
-Để làm rõ nguyên lý hoạt động của đoạn mã C++ chạy trên ESP32, giả sử thiết bị nhận được một gói dữ liệu viễn trắc với các thông số:
-\begin{itemize}
-    \item Nhiệt độ ($T$): $25°C$ (Nhiệt độ bình thường)
-    \item Độ ẩm ($H$): $50\%$ (Độ ẩm bình thường)
-    \item Gia tốc ($A$): $1.5 \text{ m/s}^2$ (Chuyển động ổn định)
-\end{itemize}
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả: Cơ chế kết nối MQTT thích nghi},
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+FUNCTION connectToBroker():
+    IF WiFi not connected:
+        RETURN failure
 
-\textit{Lưu ý: Ngưỡng quyết định (Threshold = 0.1853) được xác định bằng phương pháp phân vị 95\% (Percentile 95\%) trên phân phối điểm bất thường (\texttt{Anomaly Score}) của tập dữ liệu validation trong môi trường Python, đảm bảo rằng hệ thống bắt được khoảng 95\% dữ liệu bình thường và phác thảo ranh giới quyết định tối ưu giữa các lớp NORMAL và ANOMALY.}
+    IF broker not reachable:
+        IF TLS enabled AND fallback allowed:
+            switch to plaintext
+        ELSE:
+            RETURN failure
 
-\textbf{Bước 1: Chuẩn hóa Min-Max} \\
-Các tham số cấu hình tĩnh trên Flash: 
-$T \in [-19.96, 40.0]; H \in [30.0, 65.0]; A \in [0.5, 3.0]$. \\
-Quá trình chuẩn hóa (Normalization) sẽ ánh xạ các giá trị thực tế về khoảng [0, 1] nhằm đảm bảo không có đặc trưng nào gây lấn át (bias) trong quá trình tính khoảng cách:
-\begin{align*}
-    x_T &= \frac{25 - (-19.96)}{40 - (-19.96)} = \frac{44.96}{59.96} \approx 0.750 \\
-    x_H &= \frac{50 - 30}{65 - 30} = \frac{20}{35} \approx 0.571 \\
-    x_A &= \frac{1.5 - 0.5}{3.0 - 0.5} = \frac{1.0}{2.5} = 0.400
-\end{align*}
-$\Rightarrow X_{\text{norm}} = [0.750, 0.571, 0.400]$
+    TRY MQTT connect
+    IF success:
+        subscribe to topics
+        flush pending queue
+    ELSE:
+        increase reconnect delay (exponential backoff + jitter)
+\end{verbatim}
+\end{tcolorbox}
 
-\textbf{Bước 2: Tính khoảng cách và tìm k láng giềng} \\
-Mô hình sẽ đối chiếu vector $X_{\text{norm}}$ với 200 mẫu đại diện. Do mẫu đầu vào nằm trong vùng "Bình thường", khoảng cách tới các mẫu đại diện xung quanh sẽ tương đối nhỏ.
-Giả sử sau quá trình sàng lọc, 5 khoảng cách Euclid nhỏ nhất tìm được là: $\{0.062, 0.084, 0.105, 0.118, 0.135\}$.
+Trong quá trình publish, dữ liệu không được gửi trực tiếp ngay mà đi qua hàng đợi nội bộ. Cơ chế này giúp hệ thống vẫn hoạt động ổn định khi mất kết nối tạm thời, đồng thời phối hợp với rate limiting để tránh gửi quá nhanh gây nghẽn broker.
 
-\textbf{Bước 3: Tổng hợp và ra quyết định} \\
-Điểm dị thường (Anomaly Score) được tính là trung bình của 5 khoảng cách trên:
-$$\text{Score} = \frac{0.062 + 0.084 + 0.105 + 0.118 + 0.135}{5} = 0.1008$$
+\subsection{Hiện thực hóa bộ xử lý MQTT-to-Firestore Bridge}
 
-Đối chiếu với Ngưỡng quyết định ($\text{Threshold} = 0.1853$) đã được nhóm huấn luyện trước đó:
-Vì $\text{Score } (0.1008) < \text{Threshold } (0.1853)$, vi điều khiển đưa ra quyết định \textbf{NORMAL}, tức là trạng thái xe tải hiện tại là bình thường. Không có tín hiệu báo động được gửi lên server.
+Để đồng bộ dữ liệu từ MQTT Broker lên hệ thống lưu trữ, một service trung gian được xây dựng bằng Python với vai trò là MQTT-to-Firestore Bridge. Thành phần này subscribe các topic từ broker, xử lý dữ liệu và ghi xuống Cloud Firestore.
 
-\vspace{0.3cm}
-\noindent\textbf{Ví dụ 2: Trường hợp phát hiện dị thường (ANOMALY)} \\
+Khi nhận được một bản tin, bridge thực hiện parse payload JSON và trích xuất \textit{vehicle_id} từ topic. Trường chữ ký bảo mật (HMAC) được loại bỏ trước khi lưu vì chỉ phục vụ cho mục đích xác thực ở tầng gateway.
 
-Tiếp theo, xét một trường hợp khác khi xe tải gặp tình trạng bất thường. Giả sử thiết bị nhận được gói dữ liệu viễn trắc với các thông số:
-\begin{itemize}
-    \item Nhiệt độ ($T$): $35°C$ (Nhiệt độ động cơ cao bất thường)
-    \item Độ ẩm ($H$): $62\%$ (Độ ẩm cao bất thường)
-    \item Gia tốc ($A$): $2.8 \text{ m/s}^2$ (Rung lắc mạnh)
-\end{itemize}
+Tùy theo loại topic, dữ liệu sẽ được xử lý theo các hướng khác nhau. Với telemetry, dữ liệu được chuẩn hóa rồi đưa vào hàng đợi ghi batch. Với status, hệ thống kiểm tra sự thay đổi trước khi ghi nhằm tránh lưu trùng. Với GPS, vị trí được cập nhật trực tiếp vào document tương ứng.
 
-\textbf{Bước 1: Chuẩn hóa Min-Max} \\
-Sử dụng cùng các tham số cấu hình trên Flash: 
-$T \in [-19.96, 40.0]; H \in [30.0, 65.0]; A \in [0.5, 3.0]$. \\
-Quá trình chuẩn hóa ánh xạ các giá trị đầu vào về khoảng [0, 1]:
-\begin{align*}
-    x_T &= \frac{35 - (-19.96)}{40 - (-19.96)} = \frac{54.96}{59.96} \approx 0.917 \\
-    x_H &= \frac{62 - 30}{65 - 30} = \frac{32}{35} \approx 0.914 \\
-    x_A &= \frac{2.8 - 0.5}{3.0 - 0.5} = \frac{2.3}{2.5} = 0.920
-\end{align*}
-$\Rightarrow X_{\text{norm}} = [0.917, 0.914, 0.920]$
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả: Xử lý bản tin MQTT},
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+ON mqtt_message(topic, payload):
+    data = parse_json(payload)
+    vehicle_id = extract_from_topic(topic)
 
-\textbf{Bước 2: Tính khoảng cách và tìm k láng giềng} \\
-Mô hình đối chiếu vector $X_{\text{norm}}$ với 200 mẫu đại diện. Do mẫu đầu vào có cả ba thành phần đều cao bất thường (nhiệt độ 0.917, độ ẩm 0.914, gia tốc 0.920), khoảng cách tới các mẫu đại diện nhóm "Bình thường" (có giá trị thấp hơn) sẽ tương đối lớn.
-Kết quả 5 khoảng cách Euclid nhỏ nhất tìm được là: $\{0.287, 0.301, 0.318, 0.334, 0.352\}$.
+    remove hmac field
 
-\textbf{Bước 3: Tổng hợp và ra quyết định} \\
-Điểm dị thường (Anomaly Score) được tính là trung bình của 5 khoảng cách trên:
-$$\text{Score} = \frac{0.287 + 0.301 + 0.318 + 0.334 + 0.352}{5} = 0.3184$$
+    IF topic is telemetry:
+        data = normalize(data)
+        enqueue batch write (merge = true)
 
-Đối chiếu với Ngưỡng quyết định ($\text{Threshold} = 0.1853$):
-Vì $\text{Score } (0.3184) > \text{Threshold } (0.1853)$, vi điều khiển lập tức đưa ra quyết định \textbf{ANOMALY}. Thiết bị chuẩn bị phát hiện sự cố và sẽ gửi tín hiệu báo động khẩn cấp qua giao thức MQTT lên server trung tâm để ứng phó kịp thời.
+    ELSE IF topic is status:
+        IF data unchanged from cache:
+            skip
+        enqueue new document in status collection
 
-\subsubsection{Kịch bản kiểm thử và Kết quả thực nghiệm}
+    ELSE IF topic is gps:
+        update location field
 
-Để đánh giá khách quan độ chính xác của đoạn mã C++ trên phần cứng thực tế, nhóm thiết lập một giao thức kiểm thử tự động qua cổng Serial.
+    trigger batch flush if needed
+\end{verbatim}
+\end{tcolorbox}
 
-Quy trình kiểm thử được thực hiện theo các bước:
-\begin{enumerate}
-    \item Máy tính (Python) trích xuất ngẫu nhiên 100 mẫu (bao gồm cả NORMAL và ANOMALY) từ tập kiểm thử \texttt{dataML.csv}.
-    \item Đẩy lần lượt từng mẫu xuống ESP32 thông qua Serial theo định dạng: \\
-    \texttt{[TEST] vehicle\_id, temperature, humidity, accel\_magnitude}
-    \item ESP32 tiếp nhận, thực thi module kNN và trả về kết quả kèm thời gian xử lý: \\
-    \texttt{[ESP32\_PRED] vehicle\_id, prediction, anomaly\_score, (latency\_ms)}
-    \item Một script trên máy tính sẽ tự động đối chiếu nhãn do ESP32 dự đoán với nhãn chuẩn (Ground Truth) để xuất ra ma trận nhầm lẫn (Confusion Matrix).
-\end{enumerate}
+Để tối ưu hiệu năng, bridge không ghi dữ liệu ngay lập tức mà gom nhiều thao tác lại thành batch. Việc ghi batch giúp giảm số lượng request tới Firestore và cải thiện throughput của hệ thống.
 
-\textbf{Kết quả thực nghiệm định lượng:}
+Khi thực hiện ghi, nếu xảy ra lỗi tạm thời như timeout hoặc mất kết nối, hệ thống sẽ retry ở lần sau. Trong trường hợp lỗi nghiêm trọng hơn, dữ liệu sẽ được lưu tạm ra file để tránh mất mát.
 
-\textbf{1. Đánh giá tính toàn vẹn của mô hình sau khi tối ưu (Accuracy Retention)}
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả: Ghi dữ liệu theo batch},
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+FUNCTION flushBatch():
+    IF quota error recently:
+        RETURN
 
-\begin{table}[H]
-    \centering
-    \caption{So sánh sai lệch hiệu năng phân loại giữa Python và ESP32 (Tập test n=100)}
-    \label{tab:esp32_accuracy}
-    \renewcommand{\arraystretch}{1.3}
-    % Ép kích thước bảng vừa đúng bằng chiều rộng trang giấy
-    \resizebox{\textwidth}{!}{%
-    \begin{tabular}{|l|c|c|c|}
-        \hline
-        \textbf{Chỉ số đánh giá} & \textbf{Python (Tham chiếu)} & \textbf{ESP32 (Thực nghiệm)} & \textbf{Sự sai lệch} \\
-        \hline
-        Độ chính xác (Accuracy) & 98.46\% & 96.00\% & -2.46\% \\
-        Độ chuẩn xác (Precision) & 0.9444 & 0.8750 & -7.35\% \\
-        Độ nhạy (Recall) & 0.9917 & 0.8750 & -11.77\% \\
-        Điểm F1 (F1-score) & 0.9675 & 0.8750 & -9.55\% \\
-        \hline
-    \end{tabular}%
-    } % Kết thúc ép size
-\end{table}
+    TAKE all pending operations
 
-Qua phân tích Bảng \ref{tab:esp32_accuracy}, có thể thấy việc áp dụng kỹ thuật Model Pruning (thu gọn từ 20.000 xuống 200 mẫu đại diện) đã gây ra sự suy hao định lượng đối với độ chính xác của hệ thống. Trong tổng số 100 mẫu kiểm thử thực tế, hệ thống ESP32 dự đoán chính xác 96 trường hợp. Có 4 trường hợp dự đoán sai lệch (gồm 2 báo động giả - False Positives và 2 bỏ lọt sự cố - False Negatives). Các mẫu sai lệch này đều có giá trị nằm sát vùng ranh giới quyết định (decision boundary) giữa hai lớp dữ liệu. Tuy nhiên, với mức Accuracy đạt 96.00\% và F1-score đạt 0.8750, mô hình nhúng vẫn hoàn toàn đáp ứng được độ tin cậy cơ bản cho một hệ thống cảnh báo sớm.
+    TRY commit batch
+        IF success:
+            clear queue
+        ELSE IF transient error:
+            retry later
+        ELSE:
+            save to local cache file
+\end{verbatim}
+\end{tcolorbox}
 
-\textbf{2. Đánh giá hiệu năng xử lý (Real-time Performance)}
+\subsection{Hiện thực hóa lưu trữ dữ liệu trên Cloud Firestore}
 
-\begin{table}[H]
-    \centering
-    \caption{Các chỉ số đo lường hiệu năng thực thi firmware trên ESP32}
-    \label{tab:esp32_performance}
-    \renewcommand{\arraystretch}{1.3}
-    % Bắt đầu ép size bảng vừa với \textwidth
-    \resizebox{\textwidth}{!}{% 
-    \begin{tabular}{|l|c|c|c|}
-        \hline
-        \textbf{Tham số} & \textbf{Kết quả đo đạc} & \textbf{Yêu cầu thiết kế} & \textbf{Đánh giá} \\
-        \hline
-        Thời gian suy luận (Inference) & 8.5 ms & < 100 ms & Đạt (Vượt kỳ vọng) \\
-        Đỉnh tải bộ nhớ (Peak RAM) & 0 bytes & < 50 KB & Đạt (0\% - Hoàn toàn Flash) \\
-        Dung lượng mô hình tĩnh & 2.4 KB/xe & < 100 KB & Đạt \\
-        Thông lượng (Throughput) & 117 mẫu/giây & $\geq$ 10 Hz & Đạt \\
-        Độ trễ toàn trình (End-to-end) & $\sim$ 20.7 ms & < 100 ms & Đạt \\
-        \hline
-    \end{tabular}%
-    } % Kết thúc ép size
-\end{table}
+Cloud Firestore được sử dụng làm nơi lưu trữ dữ liệu trung tâm. Trong quá trình triển khai, cấu trúc dữ liệu được thiết kế theo dạng collection/document để phù hợp với đặc thù dữ liệu IoT.
 
-Dựa vào Bảng \ref{tab:esp32_performance}, hệ thống thể hiện sự ưu việt về mặt thiết kế tài nguyên:
-\begin{itemize}
-    \item Thời gian tính toán thuật toán mất chưa đến 10 mili-giây, giúp Gateway có dư dả chu kỳ máy (CPU cycles) để xử lý tín hiệu cho nhiều xe tải cùng lúc mà không xảy ra tình trạng nghẽn cổ chai (bottleneck).
-    \item Việc kNN Anomaly Detector được lưu trữ hoàn toàn ở Flash ROM dưới dạng constexpr array được chứng minh qua đo kiểm trên thiết bị thực tế: Peak heap usage = \textbf{0 bytes} trong quá trình initialization và inference (200 lần gọi detect). Điều này cho thấy toàn bộ dữ liệu huấn luyện (200 mẫu đại diện × 3 features) được giữ tĩnh trong Flash, không chiếm RAM khi runtime. Do đó, dung lượng RAM có sẵn (520 KB) được giải phóng hoàn toàn cho các tác vụ quan trọng khác như: bộ đệm (buffer) cho giao thức MQTT, xử lý module GPS, hay tích hợp thêm nhiều lớp bảo mật dữ liệu.
-\end{itemize}
+\begin{tcolorbox}[
+    colback=gray!5!white,      
+    colframe=black!70,         
+    title=\textbf{Cấu trúc:} Sơ đồ tổ chức dữ liệu trên Cloud Firestore,
+    arc=4pt,                   
+    boxrule=1pt,               
+    left=5pt, right=5pt, top=5pt, bottom=5pt
+]
+\begin{verbatim}
+vehicles (collection)
+ +-- {vehicle_id} (document)
+      |-- telemetry fields (merge)
+      |-- gps
+      |-- last_updated
+      +-- status (subcollection)
+           |-- auto-generated documents
+           +-- latest (document)
+\end{verbatim}
+\end{tcolorbox}
 
-\subsubsection{Tiểu kết}
+Trong quá trình ghi dữ liệu, telemetry được merge trực tiếp vào document chính để luôn giữ trạng thái mới nhất. Ngược lại, dữ liệu status được lưu thành các document riêng trong subcollection nhằm phục vụ việc truy vết lịch sử.
 
-Việc triển khai thành công mô hình học máy kNN lên vi điều khiển ESP32 là minh chứng rõ rệt cho tính khả thi của kiến trúc Edge Computing trong giám sát IoT. Dù phải đánh đổi một tỷ lệ nhỏ (2.46\%) độ chính xác để đổi lấy việc thu gọn mô hình gấp 100 lần, hệ thống đã chứng minh được hiệu năng vận hành tốt: thời gian phản hồi tức thời (~20.7ms) và không gây áp lực lên bộ nhớ. Phương pháp này hoàn toàn loại bỏ được sự phụ thuộc vào đường truyền mạng và độ trễ của máy chủ đám mây, đảm bảo hệ thống phát hiện sự cố luôn trong trạng thái tự trị, sẵn sàng ứng phó trong các môi trường vận chuyển có điều kiện liên lạc sóng vô tuyến không ổn định.
+Trước khi ghi, dữ liệu được chuẩn hóa để đảm bảo tính nhất quán. Các giá trị cảm biến được scale về đúng đơn vị, đồng thời bổ sung timestamp từ server để đồng bộ thời gian.
 
-\subsection{Triển khai hệ thống phát hiện dị thường vô tuyến (RF) trên thiết bị biên}
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả: Chuẩn hóa dữ liệu telemetry},
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+FUNCTION normalizeTelemetry(payload):
+    temperature = payload.temperature / 10
+    humidity = payload.humidity / 10
+    accel = payload.accel / 100
 
-\textbf{Cách tiếp cận bằng TinyML:}
-
-Bên cạnh việc giám sát các thông số vật lý (nhiệt độ, độ ẩm, độ rung) như đã trình bày ở mục 3.2.1, tín hiệu vô tuyến (RF) đóng vai trò sống còn trong việc duy trì liên lạc của hệ thống. Thay vì áp dụng các bộ lọc nhiễu truyền thống, nhóm đề xuất khai thác đặc tính suy hao và biến động của tín hiệu RF (bao gồm RSSI và SNR) tại cổng Gateway ESP32 để phát hiện các bất thường về mạng (như đi vào vùng lõm sóng, đứt gãy ăng-ten, hoặc bị tấn công gây nhiễu - Jamming).
-
-Quá trình khảo sát thực tế cho thấy: mỗi chiếc xe tải có một đặc tính bức xạ RF hoàn toàn khác nhau do vị trí lắp đặt ăng-ten, dung sai của module RF transceiver và nhiễu điện từ từ vỏ xe. Nếu áp dụng một mô hình kNN dùng chung (Global Model) cho toàn bộ đoàn xe, độ chính xác chỉ đạt mức 91.75\%. Để giải quyết bài toán này, nhóm quyết định áp dụng tư duy \textit{Edge ML (Học máy tại biên)}, xây dựng một cấu trúc mã nguồn cho phép ESP32 lưu trữ và thực thi các mô hình kNN được cá nhân hóa cho từng xe (Per-vehicle Model). Phương pháp này giúp tối ưu hóa ranh giới quyết định (decision boundary) sát với môi trường vật lý của từng trạm phát, qua đó nâng cao độ chính xác tổng thể lên 97.50\%.
-
-\subsubsection{Giới thiệu chung và Phân tích đặc trưng dữ liệu}
-
-Để phục vụ quá trình huấn luyện, nhóm đã tiến hành sinh tạo tập dữ liệu RF có đặc tính khác nhau cho 5 chiếc xe (Transport-1 đến Transport-5). Trong đó, \textbf{Transport-1 và Transport-2 là 2 xe được triển khai trên phần cứng ESP32 thực tế}, có profile RSSI riêng biệt dựa trên vị trí lắp đặt ăng-ten, loại Transceiver và nhiễu điện từ thực tế. Ba xe còn lại (Transport-3, Transport-4, Transport-5) là \textbf{dữ liệu mô phỏng (simulation)} được sinh tạo để chứng minh tính khái quát (generalization) của phương pháp không phụ thuộc vào phần cứng cụ thể. Tập dữ liệu tổng cộng chứa 3.000 mẫu (600 mẫu/xe). Trong phạm vi này, nhóm tập trung vào 2 xe cơ bản (Transport-1 và Transport-2 - triển khai thực tế) làm ví dụ chi tiết.
-
-Qua phân tích thống kê trên tập dữ liệu, sự khác biệt về chất lượng RF giữa hai xe được thể hiện rõ ràng qua RSSI trung bình:
-
-\begin{table}[H]
-    \centering
-    \caption{Thống kê cường độ tín hiệu RSSI trung bình theo trạng thái}
-    \label{tab:rf_rssi_comparison}
-    \renewcommand{\arraystretch}{1.3}
-    \resizebox{\textwidth}{!}{%
-    \begin{tabular}{|l|c|c|c|}
-        \hline
-        \textbf{Xe} & \textbf{NORMAL (dBm)} & \textbf{WARNING (dBm)} & \textbf{CRITICAL (dBm)} \\
-        \hline
-        Transport-1 & -65.2 & -80.1 & -98.3 \\
-        Transport-2 & -85.7 & -90.4 & -105.2 \\
-        \hline
-    \end{tabular}%
+    RETURN {
+        vehicle_id,
+        temperature,
+        humidity,
+        accel,
+        gps,
+        timestamp,
+        last_updated = server_time
     }
-\end{table}
-
-\textit{Nhận xét:} Transport-1 có chất lượng truyền dẫn rất tốt (RSSI bình thường ≈ -65 dBm), trong khi Transport-2 bị suy hao nặng (RSSI bình thường ≈ -86 dBm). Sự khác biệt này yêu cầu mô hình riêng biệt cho từng xe để tối ưu ranh giới quyết định (decision boundary) sát với môi trường vật lý cụ thể của từng trạm.
-
-\subsubsection{Tối ưu hóa mô hình và Tiền xử lý dữ liệu}
-
-\textbf{Chuẩn hóa đặc trưng (Feature Scaling) và Thủ thuật lưu trữ:} \\
-Dữ liệu RF có thang đo khác biệt lớn: RSSI ∈ [-120, -30] dBm, SNR ∈ [-20, 15] dB, Interval ∈ [800, 3000] ms. Trên ESP32, dữ liệu SNR được lượng tử hóa dưới dạng số nguyên int16 fixed-point (scale = 10) (ví dụ: 10.5 dB → 105) nhằm giảm chi phí bộ nhớ và tăng tốc tính toán. Hàm Min-Max Scaler C++ ánh xạ các giá trị vào không gian [0, 1] chuẩn hóa:
-\begin{align*}
-    x_{\text{RSSI}} &= \frac{\text{RSSI} - (-120)}{-30 - (-120)} = \frac{\text{RSSI} + 120}{90} \\
-    x_{\text{SNR}} =
-\frac{
-\left(\frac{\text{SNR}_{int16}}{10}\right) - (-20)
-}{15 - (-20)}
-=
-\frac{
-\left(\frac{\text{SNR}_{int16}}{10}\right) + 20
-}{35}\\
-    x_{\text{Interval}} &= \frac{\text{Interval} - 800}{3000 - 800} = \frac{\text{Interval} - 800}{2200}
-\end{align*}
-
-\subsubsection{Thiết kế phần mềm suy luận trên vi điều khiển ESP32}
-
-Để ESP32 có thể quản lý đồng thời nhiều mô hình AI mà không bị nhầm lẫn, nhóm thiết kế lớp đối tượng \texttt{RFKnnPredictor}. Trái tim của lớp này là một cơ chế "Định tuyến tự động" (Auto-routing): Khi nhận được gói tin LoRa, hàm sẽ đọc trường \texttt{vehicle\_id}, sau đó tự động định tuyến tới hàm suy luận tương ứng tới đúng mảng dữ liệu huấn luyện của chiếc xe đó.
-
-\begin{table}[H]
-    \centering
-    \caption{Chi phí bộ nhớ cho cấu trúc đa mô hình (Multi-model) trên phần cứng}
-    \label{tab:knn_config_2vehicles}
-    \renewcommand{\arraystretch}{1.3}
-    \begin{tabular}{|l|c|c|c|}
-        \hline
-        \textbf{Mô hình đối tượng} & \textbf{Tham số k} & \textbf{Số lượng mẫu} & \textbf{Chi phí ROM (Flash)} \\
-        \hline
-        Transport-1 & 5 & 600 mẫu & $\sim$ 6 KB \\
-        Transport-2 & 5 & 600 mẫu & $\sim$ 6 KB \\
-        \hline
-        \textbf{Tổng chi phí thực tế} & - & \textbf{1.200 mẫu} & \textbf{12 KB ($\sim$ 0.3\% Flash ESP32)} \\
-        \hline
-    \end{tabular}
-\end{table}
-
-\textit{Nhận xét kỹ thuật:} ESP32 sở hữu 4 MB Flash ROM (tương đương 4096 KB). Việc cấu hình dữ liệu thông qua chỉ thị hằng số (\texttt{constexpr}) vào file header giúp đẩy toàn bộ 12 KB dữ liệu huấn luyện vào vùng nhớ Flash. Điều này đồng nghĩa hệ thống chỉ tiêu tốn xấp xỉ 0.3\% dung lượng bộ nhớ cố định và giải phóng hoàn toàn bộ nhớ động (SRAM động (heap): 0 Bytes  
-SRAM stack: ~4.8 KB ), đảm bảo thiết bị hoạt động 24/7 mà không lo tràn RAM.
-
-\subsubsection{Triển khai TinyML - Chuyển đổi mô hình từ Python sang C++}
-
-\textbf{1. Khái niệm TinyML và quy trình Cross-Compilation:} \\
-TinyML (Tiny Machine Learning) là một lĩnh vực của học máy ứng dụng các mô hình được huấn luyện trên máy tính cá nhân (Python/PyTorch/TensorFlow) lên những thiết bị nhúng có tài nguyên hạn chế như ESP32. Đối với phân hệ RF, quy trình cross-compilation gồm ba bước chính:
-
-\begin{enumerate}
-    \item \textbf{Huấn luyện và Đánh giá} (Python): Sử dụng scikit-learn để huấn luyện kNN riêng cho từng xe trên máy tính phát triển.
-    \item \textbf{Export Dữ liệu Huấn luyện} (Python → C++): Chuyển đổi 600 điểm dữ liệu của mỗi xe thành mảng constexpr trong file header C/C++.
-    \item \textbf{Triển khai Suy luận} (C++): Cài đặt kernel kNN và auto-routing trên vi điều khiển.
-\end{enumerate}
-
-\textbf{2. Kỹ thuật Export Dữ liệu (constexpr Arrays):} \\
-Khác với phân hệ vật lý (section 3.2) phải nén 20.000 mẫu xuống 200 điểm trung tâm (~98\% dữ liệu bị bỏ), phân hệ RF chỉ có 3.000 mẫu ban đầu. Vì các lý do sau: \\
-\begin{itemize}
-    \item RF data có density thấp hơn (chỉ 3 features: RSSI, SNR, Interval) so với vật lý (3 features nhưng với 20.000 samples), nên không cần nén mạnh.
-    \item \textit{Hyperparameter tuning per-vehicle} yêu cầu 600 mẫu phân tách riêng cho từng xe để đủ dữ liệu xây dựng 3 cấp độ quyết định (NORMAL, WARNING, CRITICAL) tương ứng 50/30/20\%.
-    \item Chi phí bộ nhớ 12 KB (2 xe) chỉ chiếm khoảng 0.3\% Flash ESP32, hoàn toàn chấp nhận được.
-\end{itemize}
-
-Script Python \texttt{export\_rf\_per\_vehicle\_cpp.py} tự động chuyển đổi từ CSV sang định dạng C++:
-
-\begin{lstlisting}[language=Python, caption=Quy trình export dữ liệu từ Python sang C++ (Pseudo-code)]
-# Bước 1: Tải dữ liệu per-vehicle
-df_vehicle = pd.read_csv("dataset_per_vehicle_optimized.csv")
-df_transport_1 = df_vehicle[df_vehicle["vehicle_id"] == "Transport-1"]
-
-# Bước 2: Định dạng lại dữ liệu thành cấu trúc C++ RFSample
-samples = []
-for idx, row in df_transport_1.iterrows():
-    rssi = int(row["rssi"])              # dBm
-    snr = int(row["snr"] * 10.0)         # dB*10 (được lượng tử hóa)
-    interval = int(row["interval"])      # ms
-    label = int(row["label"])            # 0/1/2
-    samples.append(f"{{{rssi}, {snr}, {interval}, {label}}}")
-
-# Bước 3: Tạo file header C++ với constexpr
-cpp_code = f"""
-#pragma once
-constexpr std::array<RFSample, {len(samples)}> RF_TRAINING_TRANSPORT_1 = {{{{
-    {',\n    '.join(samples)}
-}}}};
-"""
-\end{lstlisting}
-
-Kỹ thuật \texttt{constexpr} cho phép thực hiện phép tính dạng hằng số tại thời điểm biên dịch (compile-time), không phải runtime. Điều này có nghĩa toàn bộ 12 KB dữ liệu 600 mẫu × 2 xe được lưu trữ trực tiếp trong vùng nhớ Flash ROM từ lúc biên dịch, không cần khởi tạo runtime nào hết.
-
-\textbf{3. Cơ chế Auto-Routing dựa trên Vehicle ID:} \\
-Lớp \texttt{RFKnnPredictor} cài đặt một hàm thực thi static \texttt{predict(vehicle\_id, rssi, snr, interval)}:
-
-\begin{lstlisting}[language=C++, caption=Cơ chế định tuyến tự động (Auto-routing) dựa trên Vehicle ID]
-class RFKnnPredictor {
-public:
-    static RFPrediction predict(
-        const std::string& vehicle_id,
-        int16_t rssi,
-        int16_t snr,
-        uint16_t interval
-    ) {
-        // Bước 1: Chuẩn hóa đặc trưng
-        float rssi_norm = (rssi - (-120)) / 90.0f;
-        float snr_norm = (snr / 10.0f - (-20)) / 35.0f;
-        float interval_norm = (interval - 800) / 2200.0f;
-        
-        // Bước 2: Định tuyến tự động dựa trên vehicle_id
-        if (vehicle_id == "Transport-1") {
-            return predict_transport_1(rssi_norm, snr_norm, interval_norm);
-        } else if (vehicle_id == "Transport-2") {
-            return predict_transport_2(rssi_norm, snr_norm, interval_norm);
-        } // ... các xe khác
-    }
-    
-private:
-    // Transport-1: k=5 (optimal từ hyperparameter tuning)
-    static RFPrediction predict_transport_1(float r, float s, float i) {
-        return knn_predict<5>(RF_TRAINING_TRANSPORT_1, r, s, i);
-    }
-    
-    // Transport-2: k=5
-    static RFPrediction predict_transport_2(float r, float s, float i) {
-        return knn_predict<5>(RF_TRAINING_TRANSPORT_2, r, s, i);
-    }
-    
-    // ... (Template specialization: k giá trị khác nhau cho từng xe)
-};
-\end{lstlisting}
-
-Kỹ thuật \textit{Template Specialization} cho phép các giá trị $k$ tối ưu khác nhau (Transport-1: $k=5$, Transport-3: $k=9$, ...) được nhúng trực tiếp vào mã nguồn tại compile-time mà không tốn runtime overhead.
-
-\textbf{4. Kernel kNN Được Tối ưu hóa cho Embedded:} \\
-Thuật toán kNN trên ESP32 được tối ưu hóa theo các bước:
-
-\begin{itemize}
-    \item \textit{Bước 1: Tính khoảng cách Euclidean} - Vòng lặp qua 600 mẫu, tính 3 đặc trưng bằng \texttt{std::sqrt()}, với Các phép toán floating-point được tăng tốc bởi FPU single-precision tích hợp trên ESP32, giúp giảm đáng kể chi phí tính toán so với phép toán phần mềm (software emulation)..
-    \item \textit{Bước 2: Sắp xếp tìm k nhỏ nhất} - sử dụng std::nth_element(distances, distances + K, distances + N); để đạt độ phức tạp trung bình O(n), tối ưu hơn so với std::sort() O(n log n).
-    \item \textit{Bước 3: Bầu cử theo đa số (Majority Vote)} - Đếm nhãn của $k$ hàng xóm gần nhất, lấy lớp có phiếu nhiều nhất.
-\end{itemize}
-
-Các phép toán này được thực hiện hoàn toàn trên stack (không heap), tránh được phân mảnh bộ nhớ.
-
-\subsubsection{Kiến trúc luồng suy luận (Inference Pipeline)}
-
-Điểm khác biệt chính giữa phát hiện dị thường vô tuyến và vật lý là: mỗi chiếc xe được gán một mô hình kNN riêng (Per-vehicle Model) thay vì dùng chung một mô hình toàn cục. Luồng dữ liệu diễn ra độc lập và tuân theo các bước tuần tự sau:
-
-\vspace{0.3cm}
-\noindent\textbf{1. Luồng truyền dẫn tín hiệu vô tuyến:}
-\begin{itemize}
-    \item \textbf{[Node TX: Lora Module]} $\xrightarrow{\text{ LoRa }}$ \textbf{[ESP32 Gateway (RX) - Đọc RSSI + SNR + Interval]}
-\end{itemize}
-
-\textit{Lưu ý: Hệ thống hỗ trợ nhiều nodes TX (Transport-1, Transport-2, ..., Transport-5) gửi tín hiệu RF đến cùng một ESP32 Gateway.}
-
-\noindent\textbf{2. Luồng suy luận Edge ML với định tuyến tự động (RFKnnPredictor):}
-\begin{itemize}
-    \item[$\hookrightarrow$] \textit{Bước 1:} Trích xuất \texttt{Vehicle\_ID} từ header gói LoRa, tự động trỏ tới mô hình kNN và tham số $k$ tương ứng.
-    \item[$\hookrightarrow$] \textit{Bước 2:} Chuẩn hóa dữ liệu RF (RSSI, SNR, Interval) về không gian [0, 1] sử dụng Min-Max Scaler.
-    \item[$\hookrightarrow$] \textit{Bước 3:} Tính khoảng cách Euclidean tới 600 mẫu huấn luyện của xe, chọn $k$ láng giềng gần nhất.
-    \item[$\hookrightarrow$] \textit{Bước 4:} Phân loại theo đa số (Majority Vote): xác định lớp NORMAL, WARNING, hoặc CRITICAL dựa trên nhãn của $k$ láng giềng.
-\end{itemize}
-
-\noindent\textbf{3. Luồng cảnh báo dị thường vô tuyến:}
-\begin{itemize}
-    \item \textbf{[ESP32 Gateway]} $\xrightarrow{\text{ Publish trạng thái MQTT }}$ \textbf{[Cloud / Server Trung tâm]} \\
-\end{itemize}
-
-\noindent\textbf{* Phân rã thời gian trễ toàn trình (Latency Breakdown - Đo kiểm thực tế):} \\
-Parse LoRa Payload (0.02ms) + Chuẩn hóa (0.04ms) + kNN Inference (8.82ms) + Phân loại đa số (0.05ms) + MQTT Publish ($\sim$ 11.52ms) = \textbf{Tổng $\sim$ 20.45ms}
-
-\noindent\textit{Chi tiết phân tích:} \\
-Luồng Edge ML (không tính MQTT): $0.02 + 0.04 + 8.82 + 0.05 = 8.93\text{ ms}$ \\
-Thời gian truyền MQTT (bao gồm chuỗi ký tự JSON + network latency): $\sim 11.52\text{ ms}$ \\
-Kết quả cho thấy toàn bộ luồng suy luận RF trên ESP32 (bao gồm định tuyến tự động, chuẩn hóa, tìm kiếm láng giềng từ 600 mẫu per-vehicle, phân loại) chỉ tiêu tốn khoảng \textbf{8.93ms} mà thôi, cho phép hệ thống xử lý khoảng 111 packets/s (pps) mà không nghẽn.
-
-\subsubsection{Ví dụ minh họa luồng thực thi thuật toán}
-
-Để làm rõ logic của đoạn mã C++, dưới đây là hai kịch bản tính toán (Trace-run) thực tế diễn ra bên trong vi điều khiển ESP32:
-
-\textbf{Kịch bản 1: Tín hiệu ổn định (Transport-1 -- NORMAL)}
-
-Gateway nhận được tín hiệu từ Transport-1 với các thông số:
-
-\begin{itemize}
-    \item RSSI = -60 dBm
-    \item SNR\_raw\_int16 = 100 (tương đương 10 dB)
-    \item Interval = 1005 ms
-\end{itemize}
-
-\begin{itemize}
-    \item \textbf{Định tuyến:} ESP32 đọc Vehicle ID "Transport-1", tự động tải tập dữ liệu 
-    \texttt{TRAINING\_TRANSPORT\_1} với tham số $k = 5$.
-    
-    \item \textbf{Chuẩn hóa Min-Max:}
-
-\begin{align}
-x_{\text{RSSI}} &= \frac{-60 + 120}{90} = 0.667 \\
-x_{\text{SNR}} &= \frac{(100/10.0) + 20}{35} = 0.857 \\
-x_{\text{Interval}} &= \frac{1005 - 800}{2200} = 0.093
-\end{align}
-
-    \item \textbf{Tính khoảng cách:} ESP32 quét mảng 600 phần tử và tìm 5 khoảng cách 
-    Euclidean nhỏ nhất.
-
-    \item \textbf{Bầu cử:} 5/5 mẫu lân cận mang nhãn NORMAL.
-
-    \item \textbf{Kết luận:} Confidence = 100\%. Hệ thống giữ trạng thái NORMAL 
-    và không kích hoạt cảnh báo.
-\end{itemize}
-
-\vspace{0.3cm}
-
-\textbf{Kịch bản 2: Suy hao tín hiệu nghiêm trọng (Transport-1 -- CRITICAL)}
-
-Tại thời điểm xe đi vào vùng lõm sóng:
-
-\begin{itemize}
-    \item RSSI = -100 dBm
-    \item SNR\_raw\_int16 = -50 (tương đương -5 dB)
-    \item Interval = 2800 ms
-\end{itemize}
-
-\begin{itemize}
-
-\item \textbf{Chuẩn hóa Min-Max:}
-
-\begin{align}
-x_{\text{RSSI}} &= 0.222 \\
-x_{\text{SNR}} &= 0.429 \\
-x_{\text{Interval}} &= 0.909
-\end{align}
-
-Vector đặc trưng nằm xa vùng NORMAL.
-
-\item \textbf{Bầu cử kNN}
-
-Trong 5 láng giềng gần nhất:
-
-\begin{itemize}
-    \item NORMAL: 1 mẫu
-    \item WARNING: 2 mẫu
-    \item CRITICAL: 2 mẫu
-\end{itemize}
-
-\item \textbf{Kết luận}
-
-Gặp trường hợp hòa phiếu giữa WARNING và CRITICAL. 
-Hệ thống áp dụng quy tắc ưu tiên theo thứ tự nhãn (label priority rule), 
-trong đó lớp xuất hiện trước trong thứ tự kiểm tra sẽ được chọn. 
-Trong trường hợp này, WARNING được ưu tiên trước CRITICAL.
-
-\begin{itemize}
-    \item Kết quả: WARNING
-    \item Confidence: 40\%
-\end{itemize}
-
-ESP32 đóng gói JSON và Publish MQTT để cảnh báo suy hao RF.
-
-\end{itemize}
-\subsubsection{Kịch bản kiểm thử và Kết quả thực nghiệm}
-
-Để nghiệm thu phân hệ RF, nhóm đã tiến hành đánh giá chéo trên tập Test riêng biệt gồm 120 mẫu ngẫu nhiên cho mỗi xe (tổng 240 mẫu, tỷ lệ train:test = 80:20).
-
-\begin{table}[H]
-    \centering
-    \caption{Chỉ số phân loại RF chi tiết trên 2 thiết bị triển khai thực tế}
-    \label{tab:rf_results_2vehicles}
-    \renewcommand{\arraystretch}{1.3}
-    \begin{tabular}{|l|c|c|c|c|c|}
-        \hline
-        \textbf{Mô hình Xe} & \textbf{Test Acc.} & \textbf{F1-NORMAL} & \textbf{F1-WARNING} & \textbf{F1-CRITICAL} & \textbf{k-used} \\
-        \hline
-        Transport-1 & 99.17\% & 1.0000 & 0.9859 & 0.9796 & 5 \\
-        Transport-2 & 95.83\% & 0.9756 & 0.9254 & 0.9600 & 5 \\
-        \hline
-        \textbf{Trung bình} & \textbf{97.50\%} & \textbf{0.9878} & \textbf{0.9557} & \textbf{0.9698} & - \\
-        \hline
-    \end{tabular}
-\end{table}
-
-\textit{Ghi chú:} Bộ dữ liệu RF gồm 3000 mẫu tổng cộng trên 5 xe (600 mẫu/xe): Transport-1 và Transport-2 từ triển khai phần cứng thực tế, Transport-3/4/5 từ mô phỏng. Mỗi xe được chia: \textbf{480 mẫu huấn luyện (80\%)} và \textbf{120 mẫu kiểm thử (20\%)}, tỷ lệ phân bố lớp cân bằng (NORMAL 50\%, WARNING 30\%, CRITICAL 20\%). Bảng này báo cáo kết quả từ 240 mẫu kiểm thử độc lập (120 mẫu/xe × 2 xe thực tế).
-
-\textbf{Phân tích độ chính xác:} Việc xây dựng mô hình riêng cho từng xe đã mang lại hiệu quả rõ rệt. Độ chính xác trung bình đạt 97.50\% (vượt trội so với mức 91.75\% nếu dùng mô hình toàn cục). Transport-1 đạt 99.17\% với tín hiệu RF chất lượng tốt (RSSI ≈ -65 dBm), trong khi Transport-2 đạt 95.83\% do tín hiệu yếu hơn (RSSI ≈ -86 dBm). Cụ thể, Transport-2 có biên giới phân loại giữa WARNING và CRITICAL bị chồng lấn (overlap) hơn, khiến độ thu hồi (Recall) của lớp WARNING giảm xuống 86.11\%. Tuy nhiên, mức điểm F1 tổng thể $\geq 0.9254$ vẫn hoàn toàn đáp ứng tiêu chuẩn mạng công nghiệp, đặc biệt với lớp CRITICAL (F1 ≥ 0.9600) là yếu tố quan trọng nhất trong an toàn hệ thống.
-
-\begin{table}[H]
-    \centering
-    \caption{Các thông số hiệu năng phần cứng khi chạy song song 2 mô hình RF (Per-vehicle) trên ESP32}
-    \label{tab:rf_esp32_performance}
-    \renewcommand{\arraystretch}{1.3}
-    \resizebox{\textwidth}{!}{%
-    \begin{tabular}{|l|c|c|c|}
-        \hline
-        \textbf{Đại lượng đo lường} & \textbf{Kết quả thực tế} & \textbf{Yêu cầu thiết kế} & \textbf{Đánh giá} \\
-        \hline
-        Không gian lưu trữ dữ liệu (ROM) & 12 KB & < 100 KB & Đạt ($\sim$ 0.3\% Flash 4MB) \\
-        Tiêu hao heap (SRAM động) & 0 Bytes (Heap), ~4.8 KB (Stack) & < 50 KB & Đạt (Không gây phân mảnh RAM) \\
-        Thời gian suy luận (Latency) & 8.93 ms & < 100 ms & Đạt (Tức thời, vượt kỳ vọng) \\
-        Thông lượng xử lý (Throughput) & 111 packets/s (pps) & $\geq$ 10 packets/s & Đạt (Dư dả cho hệ thống nhiều xe) \\
-        \hline
-    \end{tabular}%
-    }
-\end{table}
-
-\textbf{Đánh giá năng lực phần cứng:} Bảng \ref{tab:rf_esp32_performance} chứng minh sự tối ưu tuyệt đối của mã nguồn C++. 
-
-Luồng suy luận Edge ML (gồm định tuyến tự động, chuẩn hóa, tìm kiếm 600 mẫu per-vehicle, phân loại đa số) được khảo sát chi tiết:
-\begin{itemize}
-    \item \textbf{Suy luận Edge ML (inference latency):} 8.93 ms = Chuẩn hóa (0.04 ms) + Tìm khoảng cách (8.82 ms) + Bầu cử (0.05 ms) + Định tuyến (0.02 ms).
-    \item \textbf{Thời gian xấu nhất (worst-case):} 8.93 ms không thay đổi bất kể chất lượng tín hiệu, đặt nền tảng cho bảo đảm thời gian thực.
-    \item \textbf{End-to-end (toàn bộ hệ thống):} 20.45 ms khi bao gồm phân tích MQTT (11.52 ms) và truyền dữ liệu.
-\end{itemize}
-
-Mức sử dụng heap bằng 0 Bytes, trong khi Stack tạm thời ~4.8 KB (per inference, không phụ thuộc số xe) khẳng định tính ổn định của hệ thống khi phải hoạt động liên tục trong thời gian dài (24/7), không có nguy cơ phân mảnh bộ nhớ hoặc tràn heap. Thông lượng 111 packets/s (pps) đảm bảo khả năng xử lý song song nhiều xe.
-
-\subsubsection{Tiểu kết}
-
-Phân hệ phát hiện dị thường vô tuyến (RF) đã chứng minh tính đúng đắn và hiệu quả của việc cá nhân hóa mô hình AI (Per-vehicle Model) trên thiết bị biên. Bằng cách khai thác sự khác biệt về nền tảng phần cứng của từng nút mạng, thuật toán kNN đã phân loại thành công 3 cấp độ tín hiệu (NORMAL, WARNING, CRITICAL) với độ chính xác ấn tượng 97.50\%. Việc kết hợp các thủ thuật lập trình hệ thống (như nén dải động SNR bằng số nguyên, khai báo \texttt{constexpr} để đưa dữ liệu trực tiếp vào vùng Flash ROM) đã giải quyết trọn vẹn bài toán phần cứng của ESP32. 
+\end{verbatim}
+\end{tcolorbox}
+
+Trong quá trình vận hành, hệ thống kết hợp batch write, giới hạn tần suất ghi và cơ chế retry để đảm bảo không vượt quá quota của Firestore. Nhờ đó, dữ liệu từ các thiết bị có thể được lưu trữ ổn định ngay cả khi số lượng node tăng lên.
+% ==================================================
+
+\section{Hiện thực hóa và so sánh các thuật toán học máy trên Gateway}
+
+\subsection{Quy trình xử lý và huấn luyện mô hình}
+
+Dữ liệu đầu vào được lấy từ tập dataset thu thập trong môi trường IoT, bao gồm các mẫu đã được gán nhãn NORMAL và ANOMALY. Để phù hợp với bài toán phân loại nhị phân, nhãn dữ liệu được chuyển về dạng số.
+
+Nhằm mô phỏng điều kiện thực tế có nhiễu từ cảm biến, hệ thống bổ sung nhiễu Gaussian nhỏ vào dữ liệu đầu vào. Sau đó, dữ liệu được chia thành hai tập train và test với tỷ lệ cố định, đồng thời đảm bảo phân bố nhãn không bị thay đổi (stratified split).
+
+Một bước chuẩn hóa được áp dụng trên tập train và sau đó được sử dụng lại cho tập test. Các tham số chuẩn hóa (mean và standard deviation) được lưu lại để đảm bảo quá trình suy luận trên Gateway sử dụng cùng hệ quy chiếu với lúc huấn luyện.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Chuẩn bị dữ liệu}, breakable]
+\begin{verbatim}
+FUNCTION prepare_data(dataset):
+    convert label to binary
+
+    add gaussian noise
+
+    split into train and test
+
+    fit scaler on train data
+
+    transform train and test
+
+    save scaler parameters
+
+    RETURN train_set, test_set
+\end{verbatim}
+\end{tcolorbox}
+
+Bước chuẩn bị dữ liệu này đóng vai trò quan trọng nhằm đảm bảo tính nhất quán giữa môi trường huấn luyện và môi trường triển khai thực tế trên thiết bị nhúng.
+
+\subsection{Hiện thực hóa mô hình Logistic Regression}
+
+Logistic Regression được triển khai như một mô hình baseline do có cấu trúc đơn giản và chi phí tính toán thấp. Mô hình được huấn luyện trực tiếp trên dữ liệu đã chuẩn hóa.
+
+Sau khi huấn luyện, mô hình được sử dụng để dự đoán nhãn cho từng mẫu dữ liệu mới. Ngoài ra, thời gian suy luận trung bình trên mỗi mẫu cũng được đo bằng cách lặp qua từng input riêng lẻ, nhằm mô phỏng điều kiện xử lý tuần tự trên thiết bị Edge.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Logistic Regression}, breakable]
+\begin{verbatim}
+FUNCTION train_logistic_regression(train_set):
+    initialize model
+
+    fit model on training data
+
+    RETURN trained_model
+
+FUNCTION inference_lr(model, sample):
+    normalize sample using saved scaler
+
+    predict label from sample
+
+    RETURN label
+\end{verbatim}
+\end{tcolorbox}
+
+Cách triển khai này giúp đảm bảo tốc độ xử lý nhanh, độ trễ thấp và tiêu tốn ít tài nguyên, phù hợp với các hệ thống yêu cầu phản hồi tức thời. Tuy nhiên, mô hình bị hạn chế khi dữ liệu có tính phi tuyến.
+
+\subsection{Hiện thực hóa mô hình Neural Network}
+
+Để cải thiện khả năng học các mối quan hệ phi tuyến trong dữ liệu, hệ thống triển khai thêm một mô hình Neural Network nhiều lớp. Mô hình bao gồm các lớp fully-connected với hàm kích hoạt ReLU và một lớp đầu ra sigmoid để dự đoán xác suất bất thường.
+
+Trong quá trình huấn luyện, cơ chế early stopping được sử dụng nhằm tránh hiện tượng overfitting bằng cách dừng huấn luyện khi hàm loss trên tập validation không còn cải thiện. Đồng thời, class weight được áp dụng để giảm ảnh hưởng của sự mất cân bằng dữ liệu giữa hai lớp.
+
+Ngưỡng phân loại đầu ra không cố định ở 0.5 mà được điều chỉnh thấp hơn nhằm tăng khả năng phát hiện bất thường trong thực tế, đặc biệt trong các trường hợp dữ liệu gần ranh giới quyết định.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Neural Network}, breakable]
+\begin{verbatim}
+FUNCTION train_neural_network(train_set):
+    build multi-layer network
+
+    compile model with optimizer and loss
+
+    train model with early stopping
+
+    apply class weight
+
+    RETURN trained_model
+
+FUNCTION inference_nn(model, sample):
+    normalize sample using saved scaler
+
+    prob = predict probability
+
+    label = apply threshold
+
+    RETURN label
+\end{verbatim}
+\end{tcolorbox}
+
+So với Logistic Regression, mô hình Neural Network có khả năng biểu diễn tốt hơn các mối quan hệ phức tạp trong dữ liệu, từ đó cải thiện khả năng phát hiện bất thường.
+
+\subsection{Xuất mô hình và tích hợp vào hệ thống}
+
+Sau khi hoàn tất quá trình huấn luyện, mô hình Neural Network được chuyển đổi sang định dạng TensorFlow Lite nhằm phù hợp với môi trường nhúng trên ESP32.
+
+Quá trình này bao gồm bước tối ưu hóa mô hình (quantization) để giảm kích thước và tăng tốc độ suy luận. Mô hình sau khi chuyển đổi được lưu dưới dạng file nhị phân (.tflite) và tích hợp trực tiếp vào firmware của gateway.
+
+Tại thời điểm khởi tạo hệ thống, mô hình được nạp vào bộ nhớ và khởi tạo thông qua TensorFlow Lite Micro Interpreter. Đồng thời, các tham số chuẩn hóa (mean, std) cũng được nhúng vào firmware để đảm bảo dữ liệu đầu vào được xử lý đúng cách trước khi suy luận.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Xuất và tích hợp mô hình}, breakable]
+\begin{verbatim}
+FUNCTION export_model(model):
+    convert model to TFLite format
+
+    apply optimization
+
+    save model to binary file
+
+FUNCTION load_model():
+    load tflite model into memory
+
+    initialize interpreter
+
+    allocate tensors
+
+    load scaler parameters
+\end{verbatim}
+\end{tcolorbox}
+
+Trong quá trình vận hành, dữ liệu từ cảm biến sẽ được chuẩn hóa, đưa vào mô hình để suy luận và trả về kết quả theo thời gian thực. Việc triển khai tại Gateway giúp hệ thống giảm độ trễ, hạn chế phụ thuộc vào Cloud và đảm bảo khả năng hoạt động ổn định ngay cả khi mất kết nối mạng.
+
+\section{Hiện thực hóa cơ chế bảo mật của hệ thống}
+
+\subsection{Hiện thực hóa mã hóa AES-128 CBC và Base64}
+
+Trong hệ thống, dữ liệu telemetry được mã hóa trước khi truyền qua kênh LoRa nhằm đảm bảo tính bí mật. Payload đầu vào là chuỗi JSON sau khi thu thập từ các cảm biến.
+
+Quá trình mã hóa sử dụng AES-128 ở chế độ CBC. Dữ liệu được padding theo kích thước block 16 bytes trước khi thực hiện mã hóa. Kết quả sau mã hóa là dữ liệu nhị phân.
+
+Do kênh truyền UART giữa ESP32 và module LoRa sử dụng dạng chuỗi ký tự, dữ liệu nhị phân được chuyển sang Base64 trước khi gửi. Cách làm này giúp tránh lỗi do ký tự điều khiển và đảm bảo tính tương thích trong quá trình truyền.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Mã hóa dữ liệu}, breakable]
+\begin{verbatim}
+FUNCTION encrypt(payload):
+    pad payload to 16 bytes
+
+    ciphertext = AES_CBC_ENCRYPT(payload, key, iv)
+
+    encoded = BASE64_ENCODE(ciphertext)
+
+    RETURN encoded
+\end{verbatim}
+\end{tcolorbox}
+
+Tại Gateway, dữ liệu được xử lý theo chiều ngược lại. Payload được kiểm tra định dạng Base64 trước khi giải mã để tránh lỗi trong quá trình xử lý.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Giải mã dữ liệu}, breakable]
+\begin{verbatim}
+FUNCTION decrypt(payload):
+    IF payload is not base64:
+        RETURN payload
+
+    ciphertext = BASE64_DECODE(payload)
+
+    plaintext = AES_CBC_DECRYPT(ciphertext, key, iv)
+
+    remove padding
+
+    RETURN plaintext
+\end{verbatim}
+\end{tcolorbox}
+
+Cơ chế này đảm bảo dữ liệu không thể đọc trực tiếp nếu không có khóa tương ứng. Tuy nhiên, trong hiện thực hiện tại, IV được sử dụng ở dạng cố định.
+
+---
+
+\subsection{Hiện thực hóa cơ chế xác thực HMAC-SHA256}
+
+Để đảm bảo dữ liệu không bị thay đổi trong quá trình truyền, hệ thống bổ sung cơ chế xác thực dựa trên HMAC-SHA256.
+
+Tại phía ESP32, chữ ký được tính trên toàn bộ payload JSON trước khi mã hóa. Giá trị chữ ký được chèn trực tiếp vào trường \texttt{sig} trong cấu trúc dữ liệu.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Tạo chữ ký}, breakable]
+\begin{verbatim}
+FUNCTION sign(payload):
+    signature = HMAC_SHA256(secret_key, payload)
+
+    attach signature to JSON
+
+    RETURN signed_payload
+\end{verbatim}
+\end{tcolorbox}
+
+Tại Gateway, chữ ký được tính lại và so sánh với giá trị nhận được để xác định tính hợp lệ của dữ liệu.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Xác minh chữ ký}, breakable]
+\begin{verbatim}
+FUNCTION verify(payload, signature):
+    expected = HMAC_SHA256(secret_key, payload)
+
+    IF expected != signature:
+        RETURN false
+
+    RETURN true
+\end{verbatim}
+\end{tcolorbox}
+
+Cơ chế này được thực hiện trước bước giải mã nhằm đảm bảo dữ liệu chỉ được xử lý khi hợp lệ.
+
+---
+
+\subsection{Hiện thực hóa Auth Tag tại tầng truyền (CRC16)}
+
+Tại module LoRa, một lớp kiểm tra nhẹ được triển khai để phát hiện nhanh các gói tin không hợp lệ trước khi chuyển lên Gateway.
+
+Auth Tag được tính bằng CRC16 trên dữ liệu kết hợp giữa secret key, node ID, sequence number và payload. Việc bổ sung các trường này giúp ràng buộc giá trị CRC với ngữ cảnh truyền.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Auth Tag}, breakable]
+\begin{verbatim}
+FUNCTION compute_auth(node_id, seq, payload):
+    data = concat(secret_key, node_id, seq, payload)
+
+    tag = CRC16(data)
+
+    RETURN tag
+\end{verbatim}
+\end{tcolorbox}
+
+Auth Tag được thêm vào cuối mỗi gói tin trước khi truyền. Tại phía nhận, giá trị này được tính lại để kiểm tra nhanh tính hợp lệ của gói tin trước khi thực hiện các bước xử lý sâu hơn.
+
+---
+
+\subsection{Hiện thực hóa cơ chế chống phát lại (Anti-Replay)}
+
+Hệ thống sử dụng sequence number để kiểm soát thứ tự gói tin và phát hiện các trường hợp phát lại.
+
+Tại Gateway, mỗi node được theo dõi thông qua giá trị sequence gần nhất. Cơ chế sliding window bitmap được sử dụng để lưu trạng thái các gói đã nhận trong một khoảng nhất định.
+
+\begin{tcolorbox}[colback=gray!5!white, colframe=black!70, title=\textbf{Mã giả: Anti-Replay}, breakable]
+\begin{verbatim}
+FUNCTION check_replay(seq):
+    IF seq > last_seq:
+        shift window
+        mark seq as received
+        update last_seq
+        RETURN valid
+
+    diff = last_seq - seq
+
+    IF diff too large OR already received:
+        RETURN invalid
+
+    mark seq
+    RETURN valid
+\end{verbatim}
+\end{tcolorbox}
+
+Cơ chế này cho phép hệ thống chấp nhận các gói tin hợp lệ theo thứ tự tăng dần, đồng thời loại bỏ các gói trùng lặp hoặc nằm ngoài phạm vi kiểm soát.
+
+\subsection{Tổng hợp cơ chế bảo mật trong hệ thống}
+
+Các cơ chế bảo mật được triển khai theo chuỗi xử lý từ thiết bị biên đến Gateway. Tại phía ESP32, dữ liệu được ký bằng HMAC và mã hóa AES trước khi truyền. Ở tầng LoRa, Auth Tag được thêm vào để kiểm tra nhanh tính hợp lệ. Tại Gateway, dữ liệu được kiểm tra replay, xác minh chữ ký và giải mã.
+
+Chuỗi xử lý này đảm bảo dữ liệu được bảo vệ xuyên suốt quá trình truyền với chi phí tính toán phù hợp cho hệ thống nhúng.
+
+\subsection{Luồng xử lý bảo mật end-to-end}
+
+Chuỗi xử lý bảo mật trong hệ thống được thực hiện theo thứ tự từ thiết bị phát đến thiết bị nhận như sau:
+
+\textbf{Tại phía ESP32 (Node TX):}
+
+Dữ liệu cảm biến được đóng gói thành JSON, sau đó được ký bằng HMAC-SHA256 để đảm bảo tính toàn vẹn. Payload sau khi ký tiếp tục được mã hóa bằng AES-128 CBC và chuyển sang Base64 trước khi gửi qua UART xuống module LoRa.
+
+\textbf{Tại module LoRa (TX):}
+
+Payload Base64 được đóng khung và bổ sung Auth Tag (CRC16) trước khi phát vô tuyến.
+
+\textbf{Tại module LoRa (RX):}
+
+Gói tin nhận được được kiểm tra Auth Tag. Các gói không hợp lệ sẽ bị loại bỏ. Sau đó, hệ thống kiểm tra sequence number để phát hiện và loại bỏ các gói bị phát lại.
+
+\textbf{Tại phía Gateway (ESP32 RX):}
+
+Các gói hợp lệ được giải mã Base64 và AES. Sau đó, chữ ký HMAC được xác minh để đảm bảo dữ liệu không bị thay đổi trước khi đưa vào xử lý ứng dụng.
+
+\section{Phát triển giao diện giám sát (UI/UX Implementation)}
+\subsection{Xây dựng Web Dashboard giám sát và quản lý đoàn xe}
+\subsection{Xây dựng Ứng dụng di động nhận thông báo cảnh báo thời gian thực}

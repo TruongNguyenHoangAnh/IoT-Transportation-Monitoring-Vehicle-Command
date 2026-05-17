@@ -1,0 +1,1322 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[vietnamese]{babel}
+\usepackage{tcolorbox}
+\usepackage{verbatim}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\title{Hiện thực Gateway (Node RX) - Hệ thống LoRa IoT}
+\author{}
+\date{}
+
+\begin{document}
+
+\section{Hiện thực Gateway (Node RX)}
+
+Node RX/Gateway đóng vai trò trung tâm trong hệ thống, tiếp nhận dữ liệu từ các Node TX qua LoRa, xác thực tính toàn vẹn của thông tin, và chuyển tiếp lên Cloud. Tài liệu này mô tả các tầng xử lý từ radio LoRa đến vi điều khiển ESP32 theo hướng hiện thực hóa và triển khai thực tế.
+
+\subsection{Nhận dữ liệu từ LoRa}
+
+\subsubsection{Cơ chế ngắt RX\_DONE và lưu bộ đệm}
+
+Module LoRa RA-08H hoạt động ở chế độ nhận liên tục. Khi một gói tin được nhận hoàn chỉnh, module phát sinh ngắt \texttt{RX\_DONE}. Tại thời điểm này, payload được đọc trực tiếp từ bộ đệm radio và sao chép vào vùng nhớ RAM (LoraBuf). Các thông số như RSSI (độ mạnh tín hiệu) và SNR (tỉ số tín hiệu/nhiễu) cũng được ghi lại để theo dõi chất lượng truyền.
+
+Để đảm bảo an toàn bộ nhớ, hệ thống kiểm tra kích thước gói tin trước khi sao chép. Nếu vượt quá giới hạn buffer, dữ liệu sẽ bị cắt bớt. Sau bước này, hệ thống chuyển sang trạng thái RX để tiếp tục xử lý ở các tầng phía trên.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Xử lý ngắt RX\_DONE và lưu bộ đệm gói tin,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Sự kiện Xử_lý_Nhat_RX_DONE(payload, size, rssi, snr):
+
+    Đưa module radio về trạng thái Sleep/Idle
+
+    Nếu size vượt quá giới hạn bộ đệm:
+        Cắt địa chỉ size = Giới_hạn_tối_đa
+
+    Sao chép payload vào bộ đệm LoraBuf
+    Ghi độ dài gói tin vào LoraLen
+
+    Lưu giá trị chất lượng tín hiệu:
+        RssiValue = rssi
+        SnrValue = snr
+
+    Đánh dấu cờ: Có_dữ_liệu_mới = True
+
+    Chuyển hệ thống sang trạng thái RX
+    để xử lý tầng tiếp theo
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Chu trình đọc dữ liệu từ UART trên ESP32}
+
+Sau khi LoRa phát sinh ngắt RX\_DONE, module gửi thông tin qua cổng UART để thông báo cho ESP32. ESP32 tiếp nhận dữ liệu dưới dạng chuỗi ký tự, từng dòng kết thúc bằng \texttt{\textbackslash n}. Hệ thống xử lý các loại dòng khác nhau:
+
+\begin{itemize}
+    \item Dòng metadata: \texttt{[RX OK]} (báo hiệu gói tin hợp lệ từ radio)
+    \item Dòng payload: Base64 hoặc JSON
+    \item Dòng log: Bỏ qua các dòng không liên quan
+\end{itemize}
+
+Khi nhận metadata, hệ thống chờ dòng payload tiếp theo trong khoảng thời gian định trước. Nếu không nhận đủ dữ liệu trong thời gian chờ, gói tin sẽ bị gỏi.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Đọc dữ liệu từ UART và ghép gói RX,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán UART_Đọc_Gói_RX():
+
+    Lặp liên tục:
+
+        Nếu UART có dữ liệu sẵn sàng:
+
+            Dòng thứ nhất = đọc cho đến ký tự newline
+            Loại bỏ khoảng trắng đầu cuối
+
+            Nếu dòng thứ nhất rỗng:
+                Tiếp tục vòng lặp
+
+            Nếu dòng thứ nhất bắt đầu bằng "[RX OK]":
+
+                Bắt đầu bộ đếm timeout
+
+                Trong khi chưa vượt quá thời gian chờ:
+
+                    Nếu UART có dữ liệu:
+                        Dòng thứ hai = đọc cho đến ký tự newline
+                        Loại bỏ khoảng trắng
+
+                        Nếu dòng thứ hai hợp lệ (không rỗng):
+                            Tổng hợp = dòng thứ nhất + dòng thứ hai
+                            Trả về tổng hợp
+
+                // Đã timeout, không nhận được payload
+                Tiếp tục vòng lặp
+
+            Nếu dòng thứ nhất là JSON hoặc Base64:
+                Trả về dòng thứ nhất cho xử lý tiếp theo
+
+            Ngược lại:
+                Bỏ qua (dòng không liên quan hoặc log hệ thống)
+
+    Trả về NULL nếu không có dữ liệu
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Kiểm tra CRC và Auth Tag}
+
+\subsubsection{Phân tích cấu trúc gói tin}
+
+Sau khi nhận được dữ liệu thô từ LoRa, hệ thống perf hành phân tích cấu trúc theo định dạng đã thiết kế. Gói tin bao gồm các trường: node\_id (định danh thiết bị), sequence number (số thứ tự), payload (dữ liệu chính), và auth tag (thẻ xác thực). Các trường này được trích xuất trực tiếp từ chuỗi byte phân cách rõ ràng.
+
+Đầu tiên, hệ thống kiểm tra độ dài tối thiểu. Nếu gói tin quá nhỏ, nó sẽ bị loại bỏ mà không xử lý thêm. Quy trình này đảm bảo chỉ những gói tin đủ đầy đủ mới tiến vào bước xác thực.
+
+\subsubsection{Xác thực Auth Tag bằng CRC16}
+
+Auth Tag được tính bằng CRC16 dựa trên khoá bí mật (SECRET KEY), node\_id, sequence number và payload. Giá trị CRC16 được tính lại trên gateway và so sánh với auth tag nhận được trong gói tin.
+
+Nếu hai giá trị không trùng khớp, gói tin được xem là không hợp lệ hoặc bị nhiễu/can thiệp, và sẽ bị loại bỏ ngay. Cách tiếp cận này giúp lọc sớm các gói tin sai mà không cần thực hiện các bước xử lý nặng nề như giải mã AES.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Phân tích và xác thực Auth Tag của gói tin,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Phân_tích_Và_Xác_thực_Auth(gói_tin_thô):
+
+    Nếu độ dài gói tin < kích thước tối thiểu:
+        Loại bỏ với báo lỗi "Gói tin quá nhỏ"
+
+    Trích xuất các trường từ gói tin:
+        node_id = byte đầu tiên (hoặc từ vị trí định trước)
+        sequence_number = byte tiếp theo (hoặc từ vị trí định trước)
+        payload_length = đọc độ dài payload từ gói tin
+
+    Nếu payload_length không hợp lệ hoặc vượt quá tối đa:
+        Loại bỏ với báo lỗi "Độ dài payload không hợp lệ"
+
+    Trích xuất phần dữ liệu payload từ gói tin
+    Trích xuất auth tag nhận được từ gói tin
+
+    Tính toán auth tag mong đợi:
+        auth_tag_mong_đợi = Tính_CRC16(
+            SECRET_KEY + node_id + sequence_number + payload
+        )
+
+    Nếu auth_tag_mong_đợi không bằng auth tag nhận được:
+        Loại bỏ với báo lỗi "Giá trị xác thực không khớp"
+
+    Ngược lại:
+        Gói tin đã vượt qua bước 1 xác thực
+        Chuyển sang bước kiểm tra Replay Attack
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Giải mã Base64 và AES}
+
+\subsubsection{Quy trình kiểm tra định dạng payload}
+
+Sau khi vượt qua xác thực Auth Tag, payload cần được giải mã để lấy dữ liệu gốc. Hệ thống kiểm tra định dạng của payload:
+
+\begin{itemize}
+    \item Nếu payload là Base64 (ký tự trong bộ chữ Base64), tiến hành decode
+    \item Nếu đã là JSON, bỏ qua bước giải mã Base64
+\end{itemize}
+
+\subsubsection{Giải mã Base64 để lấy dữ liệu mã hoá AES}
+
+Base64 là phương pháp mã hoá biểu diễn dữ liệu nhị phân thành dạng ký tự. Hệ thống sẽ decode chuỗi Base64 để lấy lại dữ liệu nhị phân ban đầu (dữ liệu đã được mã hoá bằng AES từ Node TX).
+
+Quá trình decode Base64 kiểm tra tính hợp lệ của chuỗi. Nếu chuỗi không phải Base64 hợp lệ, dữ liệu sẽ bị loại bỏ.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Kiểm tra định dạng và giải mã Base64,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Kiểm_tra_Định_dạng_Và_Decode_Base64(payload):
+
+    // Kiểm tra xem payload là JSON hay Base64
+    Nếu payload bắt đầu bằng '{' \hoặc '[':
+        // Đây là JSON, không cần decode
+        Trả về payload (không thay đổi)
+
+    Ngược lại:
+        // Xác suất là Base64, tiến hành decode
+        Nếu payload chứa ký tự không nằm trong bộ Base64:
+            Loại bỏ với báo lỗi "Không phải Base64 hợp lệ"
+
+        // Decode Base64
+        dữ_liệu_nhị_phân = Decode_Base64(payload)
+
+        Nếu quá trình decode thất bại:
+            Loại bỏ với báo lỗi "Giải mã Base64 thất bại"
+
+        Trả về dữ_liệu_nhị_phân
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Giải mã AES-CBC để lấy JSON gốc}
+
+Sau khi decode Base64, nếu dữ liệu vẫn không phải JSON, hệ thống sẽ tiến hành giải mã AES-CBC. AES-CBC (Advanced Encryption Standard - Cipher Block Chaining) là thuật toán mã hoá đối xứng, sử dụng khoá và vector khởi tạo (IV) được chia sẻ trước giữa Node TX và Gateway.
+
+Quá trình giải mã AES:
+\begin{itemize}
+    \item Sử dụng khoá AES được lưu trữ an toàn trong gateway
+    \item Trích xuất IV từ phần đầu của dữ liệu mã hoá (thường là 16 byte đầu tiên)
+    \item Giải mã phần dữ liệu còn lại bằng IV và khoá này
+    \item Loại bỏ padding từ dữ liệu giải mã
+\end{itemize}
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Giải mã AES-CBC để lấy dữ liệu gốc,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Giải_mã_AES_CBC(dữ_liệu_nhị_phân):
+
+    // Kiểm tra độ dài tối thiểu
+    // (IV là 16 byte + tối thiểu 16 byte dữ liệu mã hoá)
+    Nếu độ dài dữ_liệu_nhị_phân < 32 byte:
+        Loại bỏ với báo lỗi "Dữ liệu mã hoá quá nhỏ"
+
+    // Trích xuất IV (16 byte đầu tiên)
+    vector_khởi_tạo = Lấy byte từ 0 đến 15
+
+    // Trích xuất dữ liệu mã hoá
+    dữ_liệu_mã_hoá = Lấy byte từ vị trí 16 trở đi
+
+    // Tải khoá AES từ bộ nhớ an toàn
+    khoá_AES = Tải_Khoá_AES_Từ_Flash()
+
+    // Giải mã bằng AES-CBC
+    dữ_liệu_giải_mã = Giải_mã_AES_CBC(
+        dữ_liệu_mã_hoá,
+        khoá_AES,
+        vector_khởi_tạo
+    )
+
+    Nếu giải mã thất bại (lỗi padding hoặc khoá sai):
+        Loại bỏ với báo lỗi "Giải mã AES thất bại"
+
+    // Loại bỏ padding
+    dữ_liệu_gốc = Loại_bỏ_Padding_PKCS7(dữ_liệu_giải_mã)
+
+    // Chuyển đổi sang JSON
+    Nếu dữ_liệu_gốc không bắt đầu bằng '{' hoặc '[':
+        Loại bỏ với báo lỗi "Dữ liệu giải mã không phải JSON"
+
+    Trả về dữ_liệu_gốc (JSON)
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Xác thực HMAC}
+
+\subsubsection{Cơ chế ký số HMAC-SHA256}
+
+Sau khi giải mã hoặc khi payload đã là JSON, hệ thống tiến hành xác thực chữ ký HMAC-SHA256. HMAC (Hash-based Message Authentication Code) đảm bảo rằng dữ liệu không bị sửa đổi sau khi rời khỏi Node TX.
+
+Quy trình xác thực HMAC:
+\begin{enumerate}
+    \item Trích xuất trường \texttt{sig} từ JSON (đây là HMAC được tính toán trên Node TX)
+    \item Xóa trường \texttt{sig} khỏi JSON để có dữ liệu gốc
+    \item Tái tạo JSON theo định dạng chuẩn (sắp xếp khoá, định dạng giá trị)
+    \item Tính HMAC-SHA256 trên dữ liệu này bằng secret key
+    \item So sánh HMAC tính toán với HMAC nhận được
+\end{enumerate}
+
+\subsubsection{So sánh an toàn (timing-safe comparison)}
+
+Để tránh tấn công dựa trên thời gian, hệ thống sử dụng so sánh an toàn. Thay vì dừng ngay khi phát hiện khác biệt ở byte đầu tiên, thuật toán sẽ so sánh toàn bộ chuỗi trong thời gian nhất định, làm mờ thông tin về vị trí lỗi.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Xác thực HMAC-SHA256 và kiểm tra chữ ký,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Xác_thực_HMAC_Chữ_ký(dữ_liệu_JSON):
+
+    // Parse JSON
+    đối_tượng_JSON = Phân_tích_JSON(dữ_liệu_JSON)
+
+    Nếu độ dài của đối_tượng_JSON == 0:
+        Loại bỏ với báo lỗi "JSON không hợp lệ"
+
+    // Trích xuất chữ ký HMAC
+    Nếu không tồn tại trường "sig" trong JSON:
+        Loại bỏ với báo lỗi "Thiếu trường chữ ký (sig)"
+
+    chữ_ký_nhận = Đọc_trường_sig(đối_tượng_JSON)
+
+    // Xóa trường sig khỏi đối tượng
+    Xóa_trường(đối_tượng_JSON, "sig")
+
+    // Tái tạo JSON theo định dạng chuẩn
+    // (sắp xếp khoá theo thứ tự, không khoảng trắng thừa)
+    dữ_liệu_chuẩn = Tái_tạo_JSON_Chuẩn(đối_tượng_JSON)
+
+    // Tải secret key từ bộ nhớ an toàn
+    secret_key = Tải_Secret_Key_Từ_Flash()
+
+    // Tính HMAC-SHA256
+    chữ_ký_mong_đợi = Tính_HMAC_SHA256(dữ_liệu_chuẩn, secret_key)
+
+    // So sánh an toàn (timing-safe)
+    nếu So_sánh_An_toàn(chữ_ký_mong_đợi, chữ_ký_nhận):
+        Gói tin hợp lệ ở mức HMAC
+
+    Ngược lại:
+        Loại bỏ với báo lỗi "Chữ ký HMAC không khớp"
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Phát hiện Replay Attack}
+
+\subsubsection{Mô tả vấn đề Replay Attack}
+
+Replay Attack là tấn công mà kẻ tấn công bắt chính xác một gói tin hợp lệ, rồi gửi lại gói tin đó nhiều lần trong tương lai. Mặc dù gói tin có CRC, Auth Tag, HMAC hợp lệ, nhưng nó lại là dữ liệu cũ được lặp lại.
+
+Để chống lại loại tấn công này, hệ thống duy trì một danh sách trạng thái của từng Node, bao gồm sequence number cuối cùng được chấp nhận và một bitmap (cửa sổ trượt) để phát hiện những gói tin bị gửi lại.
+
+\subsubsection{Thuật toán Sliding Window}
+
+Thuật toán Sliding Window hoạt động như sau:
+\begin{enumerate}
+    \item Mỗi node có một \texttt{last\_seq} (sequence cuối cùng được chấp nhận) và một bitmap kích thước cố định (ví dụ 16 bit)
+    \item Khi gói tin mới đến với sequence $s$:
+    \begin{itemize}
+        \item Nếu $s > \text{last\_seq}$: Cửa sổ dịch chuyển, cập nhật last\_seq, chấp nhận
+        \item Nếu $s = \text{last\_seq}$: Loại bỏ (gói tin trùng)
+        \item Nếu $s < \text{last\_seq}$: Kiểm tra bit tương ứng trong bitmap
+        \begin{itemize}
+            \item Nếu bit = 1: Loại bỏ (Replay)
+            \item Nếu bit = 0: Đặt bit = 1, chấp nhận
+        \end{itemize}
+    \end{itemize}
+    \item Nếu $s$ nằm ngoài cửa sổ (quá cũ): Loại bỏ
+\end{enumerate}
+
+Cách thiết kế này cho phép hệ thống chống replay đồng thời vẫn chấp nhận mất gói tin trong môi trường LoRa không đáng tin cậy.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Kiểm tra chống Replay Attack bằng Sliding Window,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Kiểm_tra_Chống_Replay(node_id, sequence_nhập, dữ_liệu):
+
+    // Tìm hoặc tạo trạng thái cho node
+    nút = Tìm_hoặc_Tạo_Node(node_id)
+
+    Nếu nút == NULL:
+        Loại bỏ với báo lỗi "Vượt quá số lượng node tối đa"
+
+    // Lấy trạng thái Sliding Window của node
+    last_seq = Lấy_Last_Sequence(nút)
+    bitmap = Lấy_Bitmap(nút)
+    window_size = Hằng_số_Kích_thước_Cửa_sổ
+
+    Nếu sequence_nhập > last_seq:
+
+        // Gói tin có sequence cao hơn, dịch chuyển cửa sổ
+        dịch_chuyển = sequence_nhập - last_seq
+
+        Nếu dịch_chuyển > window_size:
+            // Jump quá lớn, có thể bị thay thế hoặc mất gói
+            Loại bỏ với báo lỗi "Nhảy sequence quá lớn"
+
+        // Dịch bitmap sang trái dịch_chuyển vị trí
+        bitmap = Dịch_Trái_Bitmap(bitmap, dịch_chuyển)
+
+        // Đặt bit thấp nhất (vị trí sequence hiện tại)
+        Đặt_Bit_Thứ(bitmap, 0)
+
+        // Cập nhật trạng thái
+        Cập_nhật_Last_Sequence(nút, sequence_nhập)
+        Cập_nhật_Bitmap(nút, bitmap)
+
+        // Lưu dữ liệu được chấp nhận
+        Chấp_nhận_Dữ_liệu(nút, dữ_liệu)
+
+    Ngược lại:
+
+        // sequence_nhập <= last_seq, kiểm tra bitmap
+        khác_biệt = last_seq - sequence_nhập
+
+        Nếu khác_biệt >= window_size:
+            // Gói tin quá cũ, nằm ngoài cửa sổ
+            Loại bỏ với báo lỗi "Gói tin quá cũ, ngoài cửa sổ"
+
+        // Kiểm tra xem bit đã được thiết lập hay chưa
+        bit_position = khác_biệt
+
+        bit_value = Đọc_Bit_Thứ(bitmap, bit_position)
+
+        Nếu bit_value == 1:
+            // Bit đã thiết lập, gói tin này đã từng được chấp nhận
+            Loại bỏ với báo lỗi "Phát hiện Replay Attack"
+
+        Ngược lại:
+            // Bit chưa thiết lập, đây là gói tin mới (mất gói từ trước)
+            Đặt_Bit_Thứ(bitmap, bit_position)
+
+            Cập_nhật_Bitmap(nút, bitmap)
+
+            // Lưu dữ liệu được chấp nhận
+            Chấp_nhận_Dữ_liệu(nút, dữ_liệu)
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Quản lý trạng thái Node}
+
+Để hỗ trợ cơ chế Sliding Window, hệ thống duy trì một danh sách các node đang hoạt động. Mỗi node được biểu diễn dưới dạng một cấu trúc bao gồm:
+\begin{itemize}
+    \item \texttt{node\_id}: Định danh duy nhất của node
+    \item \texttt{last\_seq}: Sequence number cuối cùng được chấp nhận
+    \item \texttt{bitmap}: Cửa sổ trượt để phát hiện replay
+    \item \texttt{timestamp}: Thời gian hoạt động cuối cùng (để xóa node cũ)
+\end{itemize}
+
+Khi một gói tin mới đến, hệ thống tìm kiếm node tương ứng. Nếu chưa tồn tại và số lượng node chưa vượt quá giới hạn, một node mới sẽ được tạo. Trường hợp ngược lại, gói tin sẽ bị từ chối.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Quản lý danh sách Node và cấp phát tài nguyên,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Tìm_hoặc_Tạo_Node(node_id):
+
+    // Tìm kiếm node trong danh sách hiện có
+    Với mỗi nút hiện tại trong danh_sách_Node:
+
+        Nếu node_id của nút == node_id đang tìm:
+            Cập_nhật_Thời_gian_Hoạt_động(nút)
+            Trả về nút
+
+    // Node chưa tồn tại, kiểm tra dung lượng
+    Nếu số lượng node hiện tại < giới_hạn_tối_đa_node:
+
+        // Tạo node mới
+        nút_mới = Khởi_tạo_Node_Mới()
+
+        Gán_node_id(nút_mới, node_id)
+        Gán_Last_Sequence(nút_mới, 0)
+        Gán_Bitmap(nút_mới, 0)
+        Gán_Thời_gian_Hoạt_động(nút_mới, Thời_gian_Hiện_tại)
+
+        Thêm nút_mới vào danh_sách_Node
+
+        Trả về nút_mới
+
+    Ngược lại:
+        // Vượt quá số lượng node tối đa
+        Trả về NULL
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Nạp lại dữ liệu từ lưu trữ bền vững}
+
+Để giữ lại trạng thái Sliding Window ngay cả sau khi ESP32 restart, hệ thống lưu thông tin node vào SPIFFS. Khi khởi động lại, hệ thống sẽ nạp lại danh sách node từ bộ nhớ flash để tiếp tục phát hiện replay attack.
+
+\subsection{Tầng quản lý kết nối mạng và cấu hình WiFi}
+
+\subsubsection{Cơ chế quản lý kết nối WiFi (AP/STA)}
+
+Gateway ESP32 hỗ trợ hai chế độ kết nối mạng để đảm bảo tính linh hoạt và khả năng cấu hình từ xa:
+
+\begin{itemize}
+    \item \textbf{Chế độ AP (Access Point)}: Gateway hoạt động như một điểm truy cập WiFi riêng lập, cho phép người dùng kết nối qua trình duyệt để cấu hình thông tin SSID và mật khẩu WiFi. Chế độ này sử dụng giao diện web tại địa chỉ quản lý định trước.
+    
+    \item \textbf{Chế độ STA (Station)}: Gateway kết nối tới một mạng WiFi hiện có (thường là router chính), từ đó có thể gửi dữ liệu lên Cloud và các hệ thống backend khác.
+\end{itemize}
+
+Hệ thống sử dụng máy trạng thái (State Machine) để quản lý quá trình chuyển đổi giữa hai chế độ này, đảm bảo sự ổn định và ngăn ngừa các trạng thái không hợp lệ.
+
+\subsubsection{Máy trạng thái quản lý WiFi}
+
+Hệ thống duy trì năm trạng thái chính:
+
+\begin{itemize}
+    \item \textbf{BOOT}: Trạng thái khởi động ban đầu, hệ thống chờ cho TCP/IP stack sẵn sàng
+    \item \textbf{CONFIG\_AP}: Chế độ Access Point, chờ cấu hình WiFi từ người dùng
+    \item \textbf{CONNECTING\_STA}: Đang cố gắng kết nối tới mạng WiFi đã cấu hình
+    \item \textbf{RUNNING}: Hoàn toàn kết nối và sẵn sàng xử lý dữ liệu
+    \item \textbf{RECONNECTING}: Đang cố gắng kết nối lại sau khi mất kết nối
+\end{itemize}
+
+Quá trình chuyển đổi trạng thái được thực hiện dựa trên các sự kiện như: khởi động, timeout kết nối, nhấn nút, hoặc mất kết nối mạng.
+
+\subsubsection{Các giai đoạn chuyển đổi trạng thái}
+
+\paragraph{Giai đoạn BOOT}
+
+Khi ESP32 vừa khởi động, hệ thống sẽ ở trạng thái BOOT. Giai đoạn này dành để chờ cho ngăn xếp TCP/IP hoàn toàn sẵn sàng (thường cần 3 giây hoặc hơn). Điều này tránh các lỗi hệ thống như \texttt{tcpip\_api\_call Invalid mbox}.
+
+Sau khi khoảng thời gian chờ kết thúc, hệ thống sẽ kiểm tra xem có thông tin WiFi đã cấu hình trước đó không:
+\begin{itemize}
+    \item Nếu có cấu hình lưu trữ: Chuyển sang trạng thái CONNECTING\_STA để kết nối tới mạng đã biết
+    \item Nếu chưa có cấu hình: Chuyển sang trạng thái CONFIG\_AP để chờ người dùng cấu hình
+\end{itemize}
+
+\paragraph{Giai đoạn CONFIG\_AP}
+
+Ở chế độ Access Point, gateway phát hình một mạng WiFi có định danh (SSID) cố định. Người dùng có thể kết nối vào mạng này qua trình duyệt để:
+\begin{itemize}
+    \item Quét danh sách các mạng WiFi khả dụng xung quanh
+    \item Nhập thông tin SSID và mật khẩu
+    \item Lưu cấu hình vào bộ nhớ sẽ tồn tại qua các lần restart
+\end{itemize}
+
+Nếu không có hoạt động cấu hình trong khoảng thời gian giới hạn (thường 120 giây), hệ thống sẽ tự động khởi động lại để tiết kiệm tài nguyên.
+
+\paragraph{Giai đoạn CONNECTING\_STA}
+
+Hệ thống sẽ cố gắng kết nối tới mạng WiFi được cấu hình trước. Quá trình này có timeout giới hạn (thường 20 giây):
+\begin{itemize}
+    \item Nếu kết nối thành công trong khoảng thời gian này: Chuyển sang RUNNING
+    \item Nếu timeout mà chưa kết nối được: Kiểm tra số lần thử lại (retry counter)
+    \begin{itemize}
+        \item Nếu số lần thử < giới hạn: Đặt lại counter và thử lại từ CONNECTING\_STA
+        \item Nếu đã vượt quá giới hạn: Chuyển sang CONFIG\_AP và yêu cầu người dùng cấu hình lại
+    \end{itemize}
+\end{itemize}
+
+\paragraph{Giai đoạn RUNNING}
+
+Trong giai đoạn này, gateway đã kết nối thành công tới mạng WiFi và có thể gửi/nhận dữ liệu. Hệ thống vẫn giám sát kết nối:
+\begin{itemize}
+    \item Nếu kết nối chưa mất: Tiếp tục hoạt động bình thường
+    \item Nếu kết nối bị gián đoạn: Bắt đầu bộ đếm timeout nhỏ (thường 5 giây) để debounce
+    \begin{itemize}
+        \item Trong khoảng thời gian debounce, nếu kết nối phục hồi: Tiếp tục sử dụng
+        \item Nếu debounce kết thúc mà vẫn mất kết nối: Chuyển sang CONNECTING\_STA để kết nối lại
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Pseudo code quản lý trạng thái WiFi}
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Máy trạng thái WiFi và xử lý chuyển đổi,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Khởi_tạo_Quản_lý_WiFi():
+
+    Khởi tạo ngăn xếp WiFi
+    Chờ 1 giây để TCP/IP stack sẵn sàng
+
+    Tải thông tin cấu hình WiFi từ bộ nhớ sẵn
+    Khởi tạo nút bấm cho reset cấu hình
+
+    Đặt trạng thái = BOOT
+    Ghi lại thời gian khởi động
+
+\end{verbatim}
+\end{tcolorbox}
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Cập nhật trạng thái WiFi (gọi từ vòng lặp chính),
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Cập_nhật_Trạng_thái_WiFi():
+
+    thời_gian_hiện_tại = Lấy_thời_gian_hiện_tại()
+
+    Tùy theo trạng_thái hiện_tại:
+
+        Trường_hợp BOOT:
+
+            khoảng_chờ = thời_gian_hiện_tại - thời_gian_khởi_động
+
+            Nếu khoảng_chờ > 3000 mili_giây:
+                // TCP/IP stack đã sẵn sàng
+
+                Nếu có_cấu_hình_WiFi_lưu_trữ:
+                    Chuyển_sang_trạng_thái_Kết_nối_STA()
+
+                Ngược lại:
+                    Chuyển_sang_trạng_thái_AP()
+
+        Trường_hợp CONFIG_AP:
+
+            thời_gian_ap = thời_gian_hiện_tại - thời_gian_bắt_đầu_ap
+
+            Nếu thời_gian_ap > 120000 mili_giây:
+                // Timeout, restart
+                Khởi_động_lại_hệ_thống()
+
+        Trường_hợp CONNECTING_STA:
+
+            Nếu WiFi_đã_kết_nối():
+                Chuyển_sang_trạng_thái_RUNNING()
+
+            thời_gian_kết_nối = thời_gian_hiện_tại - thời_gian_bắt_đầu_kết_nối
+
+            Nếu thời_gian_kết_nối > 20000 mili_giây:
+                // Timeout kết nối
+
+                Lấy_số_lần_thử_hiện_tại = Đọc_từ_bộ_nhớ()
+
+                Nếu số_lần_thử_hiện_tại >= giới_hạn_thử_tối_đa:
+                    // Đã vượt quá số lần thử, reset về AP
+                    Làm_sạch_cấu_hình_WiFi()
+                    Chuyển_sang_trạng_thái_AP()
+
+                Ngược lại:
+                    // Tăng bộ đếm thử lại
+                    Tăng_số_lần_thử()
+                    // Thử lại
+                    Chuyển_sang_trạng_thái_Kết_nối_STA()
+
+        Trường_hợp RUNNING:
+
+            Nếu WiFi_vẫn_kết_nối():
+                // Mọi thứ ổn, tiếp tục
+
+                Làm_sạch_bộ_đếm_ngắt_kết_nối()
+
+            Ngược lại:
+                // Mất kết nối, cần debounce
+
+                Nếu chưa_bắt_đầu_debounce:
+                    Bắt_đầu_thời_gian_debounce()
+
+                Nếu debounce_kết_thúc_và_vẫn_mất_kết_nối:
+                    Làm_sạch_cấu_hình()
+                    Chuyển_sang_trạng_thái_Kết_nối_STA()
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Xử lý chuyển đổi giữa AP và STA}
+
+Khi chuyển đổi giữa hai chế độ hoạt động khác nhau, hệ thống phải đảm bảo làm sạch các tài nguyên cũ trước khi khởi động chế độ mới. Điều này tránh xung đột hoặc rò rỉ bộ nhớ.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Chuyển đổi từ STA sang AP,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Chuyển_sang_chế_độ_AP():
+
+    Nếu đã_ở_chế_độ_AP:
+        Trả về (tránh chuyển đổi không cần thiết)
+
+    Đặt_trạng_thái = CONFIG_AP
+    Ghi_lại_thời_gian_bắt_đầu_ap
+
+    // Làm sạch WiFi cũ
+    Ngắt_kết_nối_STA(ngắt_cả_radio = true)
+    Chờ 200 mili_giây
+
+    Tắt_hệ_thống_WiFi()
+    Chờ 100 mili_giây
+
+    // Chuyển sang AP
+    Đặt_chế_độ_WiFi = AP_STA
+    Chờ 200 mili_giây
+
+    // Cấu hình AP
+    Đặt_địa_chỉ_IP_AP()
+    Đặt_SSID_và_mật_khẩu_AP()
+    Khởi_động_AP()
+
+    Chờ 200 mili_giây
+
+    // Khởi động giám sát web
+    Khởi_động_máy_chủ_web()
+
+\end{verbatim}
+\end{tcolorbox}
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Chuyển đổi từ AP sang STA,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Chuyển_sang_chế_độ_STA():
+
+    Nếu đã_ở_trạng_thái_kết_nối_STA:
+        Trả về
+
+    Đặt_trạng_thái = CONNECTING_STA
+    Ghi_lại_thời_gian_bắt_đầu_kết_nối
+
+    // Làm sạch WiFi cũ
+    Ngắt_kết_nối_toàn_bộ(ngắt_ca_AP_và_STA = true)
+    Chờ 500 mili_giây
+
+    Tắt_hoàn_toàn_WiFi()
+    Chờ 300 mili_giây
+
+    // Chuyển sang STA
+    Đặt_chế_độ_WiFi = STATION
+    Chờ 500 mili_giây
+
+    // Cấu hình tham số WiFi
+    Tắt_chế_độ_ngủ_WiFi()
+    Bật_tự_kết_nối_lại()
+    Đặt_công_suất_phát_tối_ưu()
+
+    // Tải cấu hình lưu trữ
+    Tên_mạng = Đọc_tên_mạng()
+    Mật_khẩu = Đọc_mật_khẩu()
+
+    Nếu tên_mạng_rỗng:
+        Quay lại chế_độ_AP()
+        Trả về
+
+    // Kết nối mạng
+    Kết_nối_WiFi(tên_mạng, mật_khẩu)
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Quét mạng WiFi và cấu hình từ giao diện web}
+
+Khi ở chế độ AP, người dùng có thể yêu cầu hệ thống quét danh sách các mạng WiFi khả dụng. Hệ thống sẽ thực hiện quét, lọc các mạng trùng lặp (giữ chỉ mạng có tín hiệu mạnh nhất), sắp xếp theo cường độ tín hiệu (RSSI), và trả về danh sách hợp lý cho giao diện web.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Quét và trả về danh sách mạng WiFi,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Quét_Mạng_WiFi():
+
+    danh_sách_mạng = Danh_sách_rỗng
+
+    // Kiểm tra WiFi đã khởi tạo
+    Nếu WiFi_chưa_khởi_tạo:
+        Trả về danh_sách_rỗng
+
+    // Làm sạch kết quả quét trước
+    Làm_sạch_kết_quả_quét()
+    Chờ 100 mili_giây
+
+    // Thực hiện quét
+    bắt_đầu_quét = Lấy_thời_gian()
+    số_mạng = Quét_WiFi_không_đồng_bộ(timeout = 10 giây)
+    thời_gian_quét = Lấy_thời_gian() - bắt_đầu_quét
+
+    Nếu số_mạng <= 0:
+        Trả về danh_sách_rỗng
+
+    // Lặp qua từng kết quả quét
+    Với i = 0 đến số_mạng - 1:
+
+        tên_mạng = Lấy_SSID(i)
+        tín_hiệu = Lấy_RSSI(i)
+        bảo_mật = Lấy_loại_mã_hoá(i)
+        kênh = Lấy_kênh(i)
+
+        Thêm vào danh_sách_mạng
+
+    // Lọc trùng lặp - chỉ giữ mạng có tín hiệu mạnh nhất
+    danh_sách_duy_nhất = Danh_sách_rỗng
+
+    Với mỗi mạng trong danh_sách_mạng:
+
+        Tìm mạng có cùng tên trong danh_sách_duy_nhất
+
+        Nếu không tìm thấy:
+            Thêm vào danh_sách_duy_nhất
+
+        Ngược lại:
+            Nếu tín_hiệu_hiện_tại > tín_hiệu_tồn_tại:
+                Thay thế bằng mạng mới
+
+    // Sắp xếp theo RSSI (mạnh nhất trước)
+    Sắp_xếp_theo_tín_hiệu_giảm_dần(danh_sách_duy_nhất)
+
+    // Giới hạn danh sách ở 20 mạng
+    Nếu kích_thước > 20:
+        Cắt_danh_sách(20)
+
+    // Làm sạch kết quả quét
+    Làm_sạch_kết_quả_quét()
+
+    Trả về danh_sách_duy_nhất
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsubsection{Xử lý nút bấm reset cấu hình}
+
+Gateway hỗ trợ một nút bấm vật lý để cho phép người dùng nhanh chóng reset cấu hình WiFi mà không cần truy cập giao diện web. Nhấn giữ nút trong 5 giây sẽ làm sạch cấu hình và chuyển sang chế độ AP.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Xử lý sự kiện nút bấm cho reset,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Kiểm_tra_Nút_bấm_Reset():
+
+    trạng_thái_nút = Đọc_trạng_thái_chân_nút()
+    thời_gian_hiện_tại = Lấy_thời_gian()
+
+    Nếu nút_ấn_xuống (trạng_thái_nút == LOW):
+
+        Nếu chưa_ghi_nhận_lần_ấn:
+            Đánh_dấu_nút_ấn = True
+            Ghi_thời_gian_ấn = thời_gian_hiện_tại
+
+        // Kiểm tra giữ lâu
+        thời_gian_giữ = thời_gian_hiện_tại - ghi_thời_gian_ấn
+
+        Nếu thời_gian_giữ >= 5000 mili_giây:
+            // Giữ đủ 5 giây, reset
+            Làm_sạch_cấu_hình_WiFi()
+            Chuyển_sang_chế_độ_AP()
+            Đánh_dấu_nút_ấn = False
+
+    Ngược lại:
+        // Nút thả ra
+        Đánh_dấu_nút_ấn = False
+
+\end{verbatim}
+\end{tcolorbox}
+
+\section*{Kết luận}
+
+Quy trình xử lý dữ liệu tại Node RX/Gateway bao gồm các lớp kiểm tra an ninh lồng nhau:
+\begin{enumerate}
+    \item \textbf{Nhận dữ liệu từ LoRa}: Ngắt RX\_DONE, lưu bộ đệm, thông báo qua UART
+    \item \textbf{Kiểm tra CRC16 Auth Tag}: Phát hiện lỗi truyền hoặc can thiệp
+    \item \textbf{Giải mã Base64 và AES-CBC}: Bảo mật dữ liệu truyền
+    \item \textbf{Xác thực HMAC-SHA256}: Đảm bảo toàn vẹn dữ liệu
+    \item \textbf{Phát hiện Replay Attack}: Dùng Sliding Window để chống tấn công lặp lại
+\end{enumerate}
+
+Thiết kế này đảm bảo gateway có khả năng đơn chỉ xử lý dữ liệu hợp lệ, an toàn và không bị lặp lại, phù hợp với yêu cầu của hệ thống IoT critical.
+
+\section{Triển khai MQTT và Backend}
+
+\subsection{Kết nối MQTT Broker (QoS 1)}
+
+Tầng truyền tải của hệ thống sử dụng MQTT (Message Queuing Telemetry Transport) làm giao thức chính. Gateway ESP32 kết nối tới Mosquitto MQTT Broker trên cổng 1883 (plaintext) nhằm đơn giản hóa triển khai. Kết nối được khởi tạo ngay sau khi gateway có kết nối WiFi ổn định.
+
+Toàn bộ bản tin từ gateway được publish với QoS 1, đảm bảo mỗi bản tin được gửi ít nhất một lần. Khi broker chưa phản hồi PUBACK, phía ESP32 sẽ tự động gửi lại bản tin trong vòng timeout. Cơ chế này tránh mất dữ liệu trong các điều kiện mạng không ổn định, tuy nhiên cũng có thể gây ra bản tin trùng lặp ở phía backend.
+
+Broker Mosquitto được cấu hình cho phép kết nối không xác thực và lưu trữ pesan trong bộ nhớ RAM. Cấu hình này phù hợp với mô hình lab và phát triển nhưng cần được tăng cường bảo mật khi triển khai production.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Khởi tạo kết nối MQTT Broker,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Khởi_tạo_MQTT():
+
+    Tạo WiFi client mở
+    Tạo MQTT client từ WiFi client
+
+    Cấu hình các callback:
+        Callback_Kết_nối
+        Callback_Không_kết_nối
+        Callback_Nhận_bản_tin
+
+    Đặt máy chủ = Địa_chỉ_Broker
+    Đặt cổng = 1883
+
+    Đánh dấu đề_xuất_kết_nối = False
+
+\end{verbatim}
+\end{tcolorbox}
+
+Sau khi khởi tạo, hệ thống sẽ thực hiện nỗ lực kết nối đến broker. Nếu WiFi chưa sẵn sàng, quá trình kết nối sẽ bị trì hoãn và được thử lại định kỳ từ vòng lặp chính.
+
+\subsection{Thiết kế subscribe/publish Topic Hierarchy}
+
+Dữ liệu được tổ chức theo dạng phân cấp bằng cách sử dụng các topic có cấu trúc rõ ràng. Mỗi thiết bị (vehicle) có một định danh duy nhất (vehicle\_id), và dữ liệu từ thiết bị đó được phân loại theo các loại (telemetry, status).
+
+Cấu trúc topic được định nghĩa như sau:
+
+\begin{itemize}
+    \item \texttt{vehicles/\{vehicle\_id\}/telemetry} - Dữ liệu cảm biến định kỳ (nhiệt độ, độ ẩm, gia tốc, ánh sáng, GPS, cảnh báo anomaly, cảnh báo tamper)
+    \item \texttt{vehicles/\{vehicle\_id\}/status} - Thông tin trạng thái thiết bị (tín hiệu WiFi, tín hiệu LoRa, trạng thái kết nối, uptime)
+\end{itemize}
+
+Tại phía gateway ESP32, khi có dữ liệu cần gửi, hệ thống sẽ xác định loại topic phù hợp rồi publish bản tin theo định dạng JSON. Toàn bộ bản tin đều được kèm theo timestamp.
+
+Backend MQTT-to-Firestore Bridge subscribe các topic này với wildcard pattern (\texttt{vehicles/+/telemetry}, \texttt{vehicles/+/status}) để nhận toàn bộ bản tin từ tất cả thiết bị.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Publish bản tin telemetry,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Publish_Telemetry(vehicle_id, dữ_liệu_cảm_biến):
+
+    // Chuẩn bị payload
+    Tạo_JSON_từ_dữ_liệu()
+
+    Thêm_trường_Timestamp()
+
+    // Xác định topic
+    topic = "vehicles/" + vehicle_id + "/telemetry"
+
+    // Kiểm tra giới hạn tốc độ
+    Nếu_vượt_quá_giới_hạn_publish:
+        Đưa_vào_hàng_đợi()
+        Trả về
+
+    // Publish ngay lập tức
+    Gửi_MQTT(
+        topic,
+        payload_JSON,
+        QoS = 1,
+        retain = False
+    )
+
+    Cập_nhật_thời_gian_publish_cuối_cùng()
+
+\end{verbatim}
+\end{tcolorbox}
+
+Thiết kế này cho phép các ứng dụng backend subscribe linh hoạt chỉ các topic cần thiết. Ví dụ, một service chỉ quan tâm GPS có thể subscribe riêng topic GPS mà không nhận telemetry.
+
+\subsection{Xử lý reconnect và backoff exponential}
+
+Trong quá trình hoạt động, kết nối MQTT có thể bị mất do mất WiFi, broker restart, hoặc lỗi mạng tạm thời. Để xử lý các tình huống này, hệ thống triển khai cơ chế tự động reconnect với backoff exponential.
+
+Khi bắt đầu, khoảng delay reconnect được đặt ở giá trị nhỏ (1 giây). Nếu kết nối thất bại, delay sẽ tăng gấp đôi cho lần thử tiếp theo. Quá trình này lặp lại cho đến khi delay đạt giới hạn tối đa (60 giây), sau đó giữ nguyên ở mức đó.
+
+Khi kết nối thành công, delay sẽ được reset về giá trị ban đầu. Cơ chế này giúp tránh việc gửi quá nhiều yêu cầu kết nối liên tiếp, đặc biệt khi broker đang bị sự cố.
+
+Ngoài ra, hệ thống giám sát liên tục trạng thái kết nối. Nếu kết nối bị mất, các bản tin sẽ được đưa vào hàng đợi trong bộ nhớ RAM. Khi kết nối được phục hồi, hệ thống sẽ gửi lại các bản tin trong hàng đợi theo thứ tự ưu tiên.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Xử lý reconnect và backoff,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Quản_lý_Kết_nối_MQTT():
+
+    Nếu_MQTT_đã_kết_nối():
+        // Duy trì kết nối
+        Gọi_hàm_loop()
+        
+        // Kiểm tra heartbeat
+        Nếu_lâu_không_gửi_nhận:
+            Gửi_PING()
+
+        Trả về
+
+    Ngược_lại:
+        // Bắt đầu reconnect
+
+        thời_gian_hiện_tại = Lấy_Thời_gian()
+
+        Nếu_thời_gian_hiện_tại < lần_thử_tiếp_theo:
+            // Chưa đến thời gian thử lại
+            Trả về
+
+        // Thực hiện kết nối
+        Kết_nối_Tới_Broker()
+
+        Nếu_kết_nối_thành_công():
+
+            Đặt_lại_delay_reconnect = Giá_trị_ban_đầu
+
+            Subscribe_các_topic()
+
+            Xóa_cờ_đã_thử_lại()
+
+        Ngược_lại:
+
+            // Kết nối thất bại, tăng delay
+
+            delay_reconnect *= 2
+
+            Nếu_delay_reconnect > giới_hạn_tối_đa:
+                delay_reconnect = Giới_hạn_tối_đa
+
+            lần_thử_tiếp_theo = thời_gian_hiện_tại + delay_reconnect
+
+\end{verbatim}
+\end{tcolorbox}
+
+Hạn chế của cơ chế này là trong thời gian reconnect, các bản tin sẽ được tích tụ trong hàng đợi RAM. Nếu ESP32 restart hay mất nguồn, dữ liệu sẽ bị mất. Để xử lý trường hợp này, hệ thống triển khai cơ chế lưu hàng đợi xuống SPIFFS để bảo vệ dữ liệu.
+
+\section{Hiện thực lưu trữ trên Firebase}
+
+\subsection{Chuyển đổi dữ liệu từ MQTT sang Firestore}
+
+MQTT-to-Firestore Bridge là một service backend chạy liên tục trên máy chủ cloud hoặc on-premises. Service này subscribe các topic từ Mosquitto MQTT Broker, xử lý dữ liệu và ghi vào Cloud Firestore.
+
+Quy trình xử lý bắt đầu bằng việc subscribe các topic từ broker. Khi một bản tin tới, bridge sẽ parse JSON payload, trích xuất vehicle\_id từ topic, và loại bỏ các trường không cần thiết (chẳng hạn HMAC dùng để xác thực ở tầng gateway).
+
+Tùy theo loại topic, dữ liệu sẽ được xử lý theo các hướng khác nhau:
+
+\begin{itemize}
+    \item Với \texttt{telemetry}: Dữ liệu được chuẩn hóa (mở rộng các giá trị số được nén, điều chỉnh đơn vị), bao gồm cả GPS, ánh sáng, anomaly flag, tamper flag. Dữ liệu này sẽ merge trực tiếp vào document của vehicle để cập nhật trạng thái hiện tại.
+    
+    \item Với \texttt{status}: Dữ liệu trạng thái được lưu thành các document riêng trong subcollection. Hệ thống kiểm tra xem trạng thái có thay đổi hay không, chỉ ghi khi có sự thay đổi để tránh dữ liệu trùng lặp.
+\end{itemize}
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Xử lý bản tin MQTT và quyết định cách lưu trữ,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Sự_kiện Nhận_Bản_tin_MQTT(topic, payload_JSON):
+
+    // Phân tích và trích xuất thông tin
+    Dữ_liệu = Phân_tích_JSON(payload_JSON)
+
+    vehicle_id = Trích_xuất_từ_topic(topic)
+
+    Nếu_vehicle_id_không_hợp_lệ:
+        Ghi_lỗi_và_trả_về()
+
+    // Xác định loại dữ liệu từ topic
+    Nếu_topic_chứa_"telemetry":
+
+        Chuẩn_hóa_dữ_liệu(Dữ_liệu)
+
+        Đưa_vào_hàng_đợi_merge(
+            collection = "vehicles",
+            document = vehicle_id,
+            merge_data = Dữ_liệu
+        )
+
+    Ngược_lại_nếu_topic_chứa_"status":
+
+        Kiểm_tra_trạng_thái_thay_đổi(vehicle_id, Dữ_liệu)
+
+        Nếu_có_thay_đổi:
+            Đưa_vào_hàng_đợi_ghi(
+                collection = "vehicles/" + vehicle_id + "/status",
+                document_tự_động = True,
+                data = Dữ_liệu
+            )
+
+    // Kiểm tra xem có cần flush batch không
+    Nếu_hàng_đợi_đạt_ngưỡng_hoặc_timeout:
+        Trigger_Flush_Batch()
+
+\end{verbatim}
+\end{tcolorbox}
+
+Thiết kế này đảm bảo dữ liệu từ gateway được chuyển đổi sang cấu trúc Firestore một cách linh hoạt, phù hợp với từng loại dữ liệu.
+
+\subsection{Batch write và tối ưu ghi dữ liệu}
+
+Để tối ưu hiệu năng và giảm chi phí (Firestore tính tiền theo số lượng write), bridge không ghi dữ liệu ngay lập tức mà tích tụ nhiều thao tác ghi lại thành batch. Batch sẽ được commit cùng một lúc, giảm số lượng request tới Firestore.
+
+Mỗi batch có giới hạn tối đa 10 thao tác ghi (tuân theo hạn chế của Firestore API). Khi số lượng thao tác trong hàng đợi đạt con số này, hệ thống sẽ tự động flush batch. Ngoài ra, nếu quá 5 giây mà vẫn chưa đủ 10 thao tác, hệ thống cũng sẽ flush batch để tránh delay quá lâu.
+
+Trước khi ghi, dữ liệu telemetry sẽ được chuẩn hóa để đảm bảo tính nhất quán. Các giá trị cảm biến được mở rộng từ dạng nén (ví dụ: /10 hoặc /100), đồng thời bổ sung timestamp từ server Firestore để đồng bộ thời gian chính xác.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Quản lý batch ghi và flush,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Quản_lý_Batch_Ghi():
+
+    Lặp liên_tục:
+
+        thời_gian_hiện_tại = Lấy_thời_gian()
+
+        kích_thước_batch = Đếm_thao_tác_trong_hàng_đợi()
+
+        điều_kiện_flush = (
+            kích_thước_batch >= 10 HOẶC
+            (kích_thước_batch > 0 VÀ thời_gian_kể_từ_lần_trước >= 5000ms) HOẶC
+            (kích_thước_batch > 0 VÀ MQTT_ngắt_kết_nối)
+        )
+
+        Nếu_điều_kiện_flush:
+            Flush_Batch()
+
+        Chờ_100ms
+
+\end{verbatim}
+\end{tcolorbox}
+
+Khi thực hiện flush, batch sẽ được commit tới Firestore. Nếu commit thành công, hàng đợi sẽ được xóa trống. Nếu xảy ra lỗi tạm thời (timeout, tạm thời không kết nối được), hệ thống sẽ retry. Nếu lỗi liên quan đến quota (quá nhiều ghi trong thời gian ngắn), hệ thống sẽ chờ 60 giây trước khi thử lại.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Chuẩn hóa dữ liệu telemetry,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Chuẩn_hóa_Dữ_liệu_Telemetry(payload):
+
+    // Mở rộng các giá trị nén
+    nhiệt_độ = payload["t"] / 10.0
+
+    độ_ẩm = payload["h"] / 10.0
+
+    gia_tốc = payload["a"] / 100.0
+
+    ánh_sáng = payload["l"]
+
+    // Giữ nguyên các trường khác
+    vehicle_id = payload["v"]
+
+    signal_level = payload["sig"]
+
+    gps_latitude = payload["la"]
+
+    gps_longitude = payload["lo"]
+
+    anomaly_flag = payload["anomaly"]
+
+    tamper_flag = payload["tamper"]
+
+    // Bổ sung timestamp từ server
+    server_timestamp = Lấy_thời_gian_server()
+
+    // Trả về dữ liệu chuẩn hóa
+    Trả_về {
+        vehicle_id,
+        nhiệt_độ,
+        độ_ẩm,
+        gia_tốc,
+        ánh_sáng,
+        signal_level,
+        gps: {
+            latitude = gps_latitude,
+            longitude = gps_longitude
+        },
+        anomaly_flag,
+        tamper_flag,
+        last_updated = server_timestamp
+    }
+
+\end{verbatim}
+\end{tcolorbox}
+
+\subsection{Cơ chế cache khi lỗi (retry, flush to disk)}
+
+Khi xảy ra lỗi ghi Firestore, hệ thống triển khai cơ chế retry với backoff. Các thao tác ghi sẽ được giữ lại trong hàng đợi RAM và thử lại lần sau.
+
+Tuy nhiên, nếu bridge bị crash hoặc restart, dữ liệu trong hàng đợi RAM sẽ bị mất. Để xử lý trường hợp này, hệ thống lưu các thao tác ghi thất bại xuống file cache trên disk. Khi bridge khởi động lại, hệ thống sẽ nạp lại các thao tác từ file và thử ghi lại tới Firestore.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Xử lý lỗi và cache xuống disk,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Flush_Batch_Với_Xử_lý_Lỗi():
+
+    Lấy_tất_cả_thao_tác_trong_hàng_đợi()
+
+    Nếu_hàng_đợi_trống:
+        Trả_về
+
+    TRY:
+        Mở_batch_ghi_Firestore()
+
+        Với_mỗi_thao_tác:
+            Thêm_vào_batch()
+
+        Commit_batch()
+
+        Nếu_thành_công:
+            Xóa_tất_cả_thao_tác_khỏi_hàng_đợi()
+
+            Xóa_file_cache_nếu_tồn_tại()
+
+    EXCEPT_LỖI_QUOTA:
+        // Quá many requests, chờ 60s
+        Đặt_lệnh_chờ_60_giây()
+
+        Lưu_vào_file_cache()
+
+    EXCEPT_LỖI_TẠMTHỜI:
+        // Timeout, network error, etc.
+        Lưu_vào_file_cache()
+
+        Retry_lần_sau()
+
+    EXCEPT_LỖI_NGHIÊM_TRỌNG:
+        // Permission denied, invalid data, etc.
+        Ghi_lỗi_chi_tiết()
+
+        Loại_bỏ_thao_tác_từ_hàng_đợi()
+
+\end{verbatim}
+\end{tcolorbox}
+
+Khi khởi động, bridge sẽ kiểm tra xem file cache có tồn tại không. Nếu có, hệ thống sẽ nạp lại các thao tác vào hàng đợi RAM và thử ghi lại.
+
+\begin{tcolorbox}[
+    colback=gray!5!white,
+    colframe=black!70,
+    title=\textbf{Mã giả:} Nạp lại dữ liệu từ cache khi khởi động,
+    arc=4pt,
+    boxrule=1pt,
+    breakable
+]
+\begin{verbatim}
+Thuật_toán Khởi_động_Bridge():
+
+    Khởi_tạo_MQTT_client()
+
+    Khởi_tạo_Firestore_client()
+
+    Kửa_hàng_đợi_RAM()
+
+    // Kiểm tra file cache
+    Nếu_tồn_tại_file_cache("failed_firestore_queue.json"):
+
+        Nạp_từ_file()
+
+        Với_mỗi_thao_tác_trong_cache:
+            Đưa_vào_hàng_đợi_RAM()
+
+        Xóa_file_cache()
+
+        Ghi_nhật_ký("Đã nạp ___ thao tác từ cache")
+
+    Kết_nối_MQTT()
+
+    Bắt_đầu_vòng_lặp_chính()
+
+\end{verbatim}
+\end{tcolorbox}
+
+Cơ chế cache này đảm bảo dữ liệu từ gateway không bị mất ngay cả khi xảy ra các sự cố tạm thời ở backend. Tuy nhiên, nếu bridge ngừng hoạt động lâu dài (quá vài ngày), file cache cũng sẽ bị mất nếu bridge được reset hoặc tài nguyên disk bị giải phóng.
+
+\end{document}

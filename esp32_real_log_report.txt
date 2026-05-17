@@ -1,0 +1,66 @@
+================================================================================
+ESP32 NEURAL NETWORK INFERENCE TIME ANALYSIS
+================================================================================
+Generated: 2026-05-07 15:34:38
+
+HARDWARE SPECIFICATIONS
+--------------------------------------------------------------------------------
+Device:       ESP32 (Xtensa dual-core 32-bit @ 240 MHz)
+RAM:          520 KB SRAM on-chip
+Flash:        ~100-200 KB used for model
+Model Size:   5.66 KB (TensorFlow Lite)
+Architecture: 32(ReLU) → 16(ReLU) → 8(ReLU) → 1(Sigmoid)
+
+INFERENCE TIME STATISTICS
+--------------------------------------------------------------------------------
+Total Samples:    221
+Mean Time:        1.0045 ms
+Median Time:      1.0240 ms
+Std Deviation:    0.0536 ms
+Min Time:         0.8860 ms
+Max Time:         1.1580 ms
+25th Percentile:  1.0100 ms
+75th Percentile:  1.0290 ms
+
+PERFORMANCE COMPARISON: ESP32 vs Python
+--------------------------------------------------------------------------------
+Python (CPU):     0.0752 ms (baseline)
+ESP32 (TFLite):   1.0045 ms
+Slowdown Factor:  13.4x (expected due to 240 MHz CPU)
+Status:           [OK] ACCEPTABLE for real-time IoT
+
+LATENCY ANALYSIS FOR IOT APPLICATIONS
+--------------------------------------------------------------------------------
+Typical Sampling Rate:  1.0 Hz
+Max Allowed Latency:    1000 ms/sample
+Actual Inference Time:  1.0045 ms
+CPU Utilization:        0.10%
+Headroom:               999.0 ms
+
+RESOURCE USAGE ESTIMATION
+--------------------------------------------------------------------------------
+Flash Memory:           5.66 KB (model + runtime)
+  - 0.14% of ESP32 Flash
+RAM for Tensor Arena:   20.00 KB
+RAM for Runtime:        ~40 KB (estimate)
+  - Total: 11.54% of ESP32 RAM
+Status:                 [OK] Fits comfortably on ESP32
+
+REAL-WORLD PERFORMANCE EXPECTATIONS
+--------------------------------------------------------------------------------
+Max Inferences/Minute:  ~60
+Power per Inference:    ~0.50 mW
+Est. Daily Battery:     ~0.7 mWh (typical battery)
+Operational Window:     ~5-30 days (depending on battery)
+
+CONCLUSION FOR THESIS
+--------------------------------------------------------------------------------
+[OK] Neural Network inference on ESP32 is FEASIBLE
+[OK] Average latency: 1.005 ms (well below 1000 ms threshold)
+[OK] Memory usage: ~70-80 KB (acceptable on 520 KB RAM ESP32)
+[OK] Real-time anomaly detection at IoT scale is achievable
+
+RECOMMENDATION:
+Deploy Neural Network model on ESP32 for high-accuracy
+anomaly detection with acceptable latency and power consumption.
+================================================================================
