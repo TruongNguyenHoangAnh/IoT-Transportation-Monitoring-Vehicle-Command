@@ -1,13 +1,21 @@
 #ifndef WEB_UI_H
 #define WEB_UI_H
 
+/**
+ * @file web_ui.h
+ * @brief Local Dashboard HTML (embedded in PROGMEM)
+ * 
+ * Hệ thống Local-Only - Dashboard giám sát Real-Time
+ * Kết nối WebSocket trực tiếp với ESP32
+ */
+
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Military Transport Gateway</title>
+    <title>🛰️ RX Gateway Local Dashboard</title>
     <style>
         * {
             margin: 0;

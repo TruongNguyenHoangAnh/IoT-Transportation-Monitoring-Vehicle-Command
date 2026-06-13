@@ -51,7 +51,7 @@ bool readRXLine(String& line) {
         if (firstLine.startsWith("[RX OK]")) {
             unsigned long startTime = millis();
             String payloadLine;
-            while (millis() - startTime < 3000) {
+            while (millis() - startTime < 1500) {
                 if (serialRX.available() > 0) {
                     payloadLine = serialRX.readStringUntil('\n');
                     payloadLine.trim();

@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RX Gateway Local Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
+            color: #e0e0e0;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: rgba(20, 33, 61, 0.9);
+            border-bottom: 3px solid #00d4ff;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            color: #00d4ff;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: rgba(0, 212, 255, 0.1);
+            border: 2px solid #00d4ff;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff0000;
+            animation: pulse 1s infinite;
+        }
+        
+        .status-dot.connected {
+            background: #00ff00;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: rgba(20, 33, 61, 0.95);
+            border: 2px solid rgba(0, 212, 255, 0.3);
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            border-color: #00d4ff;
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .card-title {
+            color: #00d4ff;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .card-icon {
+            font-size: 20px;
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 8px 0;
+            padding: 8px;
+            background: rgba(0, 212, 255, 0.05);
+            border-radius: 4px;
+        }
+        
+        .metric-label {
+            color: #b0b0b0;
+            font-size: 13px;
+        }
+        
+        .metric-value {
+            color: #00ff88;
+            font-weight: bold;
+            font-size: 16px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .metric-value.warning {
+            color: #ffaa00;
+        }
+        
+        .metric-value.critical {
+            color: #ff3333;
+        }
+        
+        .gps-map {
+            width: 100%;
+            height: 300px;
+            background: #0a0a0a;
+            border: 2px solid rgba(0, 212, 255, 0.3);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 14px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .lat-lon-display {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #00ff88;
+        }
+        
+        .alerts-panel {
+            background: rgba(20, 33, 61, 0.95);
+            border: 2px solid rgba(255, 51, 51, 0.3);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .alert-item {
+            padding: 10px;
+            margin: 8px 0;
+            background: rgba(255, 170, 0, 0.1);
+            border-left: 4px solid #ffaa00;
+            border-radius: 4px;
+            font-size: 13px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .alert-item.critical {
+            background: rgba(255, 51, 51, 0.1);
+            border-left-color: #ff3333;
+        }
+        
+        .telemetry-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+        
+        .telemetry-table th,
+        .telemetry-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+        }
+        
+        .telemetry-table th {
+            background: rgba(0, 212, 255, 0.1);
+            color: #00d4ff;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 11px;
+        }
+        
+        .telemetry-table tr:hover {
+            background: rgba(0, 212, 255, 0.05);
+        }
+        
+        .anomaly-flag {
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+        
+        .anomaly-flag.normal {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+        
+        .anomaly-flag.anomaly {
+            background: rgba(255, 51, 51, 0.2);
+            color: #ff3333;
+            animation: blink 0.5s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 12px;
+            border-top: 1px solid rgba(0, 212, 255, 0.2);
+            margin-top: 40px;
+        }
+        
+        .chart-container {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+            height: 200px;
+            position: relative;
+        }
+        
+        .mini-chart {
+            width: 100%;
+            height: 100%;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        .status-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .sd-card-section {
+            padding: 15px;
+            background: rgba(0, 255, 136, 0.05);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            border-radius: 4px;
+        }
+        
+        .loading {
+            display: inline-block;
+            color: #00d4ff;
+            animation: loading 0.6s infinite;
+        }
+        
+        @keyframes loading {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 20px;
+            }
+            
+            .telemetry-table {
+                font-size: 11px;
+            }
+            
+            .telemetry-table th,
+            .telemetry-table td {
+                padding: 6px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛰️ RX GATEWAY LOCAL DASHBOARD</h1>
+            <div class="status-badge">
+                <div class="status-dot" id="wsStatus"></div>
+                <span id="wsStatusText">Kết nối...</span>
+            </div>
+        </div>
+        
+        <!-- Alerts Panel -->
+        <div class="alerts-panel" id="alertsPanel" style="display: none;">
+            <div class="card-title">⚠️ CẢNH BÁO</div>
+            <div id="alertsList"></div>
+        </div>
+        
+        <!-- Gateway Status Card -->
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📊</span> Trạng Thái Gateway</div>
+                <div class="metric">
+                    <span class="metric-label">Device ID</span>
+                    <span class="metric-value" id="deviceId">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Uptime</span>
+                    <span class="metric-value" id="uptime">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">RAM Trống</span>
+                    <span class="metric-value" id="freeHeap">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">CPU Freq</span>
+                    <span class="metric-value" id="cpuFreq">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">WiFi Clients</span>
+                    <span class="metric-value" id="wifiClients">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">WiFi Signal</span>
+                    <span class="metric-value" id="rssi">-</span>
+                </div>
+            </div>
+            
+            <!-- SD Card Status -->
+            <div class="card">
+                <div class="card-title"><span class="card-icon">💾</span> Thẻ MicroSD (Hộp Đen)</div>
+                <div class="metric">
+                    <span class="metric-label">Trạng Thái</span>
+                    <span class="metric-value" id="sdStatus">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Trống / Tổng</span>
+                    <span class="metric-value" id="sdSpace">-</span>
+                </div>
+                <div class="sd-card-section">
+                    <div style="font-size: 12px; margin-bottom: 8px;">Dung lượng</div>
+                    <div style="background: #000; border-radius: 3px; height: 10px; overflow: hidden;">
+                        <div id="sdProgress" style="height: 100%; width: 100%; background: #00ff88;"></div>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; font-size: 11px; color: #888;">
+                    📝 Ghi nhật ký: CSV + JSON
+                </div>
+            </div>
+            
+            <!-- System Health -->
+            <div class="card">
+                <div class="card-title"><span class="card-icon">❤️</span> Sức Khỏe Hệ Thống</div>
+                <div class="metric">
+                    <span class="metric-label">Packet Nhận</span>
+                    <span class="metric-value" id="packetCount">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Packet Lỗi</span>
+                    <span class="metric-value" id="errorCount">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Thời Gian Cuối</span>
+                    <span class="metric-value" id="lastUpdate">-</span>
+                </div>
+                <div style="margin-top: 15px; font-size: 12px; color: #888; text-align: center;">
+                    ✅ Hệ thống hoạt động bình thường
+                </div>
+            </div>
+        </div>
+        
+        <!-- GPS/Location Card -->
+        <div class="card" style="grid-column: 1;">
+            <div class="card-title"><span class="card-icon">🗺️</span> Vị Trí GPS Cuối Cùng</div>
+            <div class="gps-map" id="gpsMap">
+                <div class="lat-lon-display" id="latLonDisplay">Chờ dữ liệu...</div>
+                <span>GPS Map (Placeholder)</span>
+            </div>
+        </div>
+        
+        <!-- Real-time Telemetry Data Table -->
+        <div class="card" style="grid-column: 1 / -1;">
+            <div class="card-title"><span class="card-icon">📈</span> Dữ Liệu Telemetry Real-Time (10 Gói Mới Nhất)</div>
+            <table class="telemetry-table">
+                <thead>
+                    <tr>
+                        <th>Thời Gian</th>
+                        <th>Node ID</th>
+                        <th>Nhiệt Độ</th>
+                        <th>Độ Ẩm</th>
+                        <th>Gia Tốc</th>
+                        <th>GPS</th>
+                        <th>Trạng Thái</th>
+                        <th>Điểm Bất Thường</th>
+                        <th>RSSI/SNR</th>
+                    </tr>
+                </thead>
+                <tbody id="telemetryBody">
+                    <tr><td colspan="9" style="text-align: center; color: #666;">Chờ dữ liệu từ LoRa...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- WebSocket Debug Console -->
+        <div class="card" style="grid-column: 1 / -1; margin-top: 20px;">
+            <div class="card-title"><span class="card-icon">🔧</span> Debug Console (WebSocket)</div>
+            <div style="background: #000; border: 1px solid rgba(0, 212, 255, 0.2); 
+                        border-radius: 4px; padding: 10px; font-family: 'Courier New'; 
+                        font-size: 11px; max-height: 200px; overflow-y: auto;"
+                 id="debugConsole">
+                <div style="color: #888;">[SYSTEM] Dashboard khởi động...</div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>RX ESP32 Gateway Local-Only System | Hộp Đen Lưu Trữ Cục Bộ | 🔒 Không Kết Nối Cloud</p>
+            <p style="margin-top: 10px; font-size: 11px;">
+                Dữ liệu được lưu trữ 100% nội bộ trên thẻ MicroSD • Quyền riêng tư & Bảo mật quân sự
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // ============ WebSocket Setup ============
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        
+        const telemetryData = [];
+        const MAX_TELEMETRY_ROWS = 10;
+        
+        function connectWebSocket() {
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = function() {
+                    console.log('[WS] Kết nối thành công');
+                    updateWSStatus(true);
+                    reconnectAttempts = 0;
+                    addDebugLog('[SUCCESS] Kết nối WebSocket thành công');
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        handleWebSocketMessage(msg);
+                    } catch (e) {
+                        console.error('[WS] JSON parse error:', e);
+                    }
+                };
+                
+                ws.onerror = function(error) {
+                    console.error('[WS] Lỗi:', error);
+                    addDebugLog('[ERROR] WebSocket error: ' + error);
+                };
+                
+                ws.onclose = function() {
+                    console.log('[WS] Ngắt kết nối');
+                    updateWSStatus(false);
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                        setTimeout(connectWebSocket, delay);
+                        addDebugLog(`[INFO] Sẽ kết nối lại trong ${delay}ms (lần ${reconnectAttempts})`);
+                    }
+                };
+            } catch (e) {
+                console.error('[WS] Connection failed:', e);
+            }
+        }
+        
+        function handleWebSocketMessage(msg) {
+            const type = msg.type;
+            
+            switch (type) {
+                case 'WELCOME':
+                    addDebugLog('[INFO] ' + msg.message);
+                    break;
+                    
+                case 'TELEMETRY':
+                    handleTelemetry(msg.data);
+                    addDebugLog(`[TELEMETRY] Node ${msg.data.node_id} - T=${msg.data.temperature}°C`);
+                    break;
+                    
+                case 'GATEWAY_STATUS':
+                    handleGatewayStatus(msg.data);
+                    break;
+                    
+                case 'ALERT':
+                    handleAlert(msg.data);
+                    addDebugLog(`[ALERT] ${msg.data.type}: ${msg.data.message}`);
+                    break;
+                    
+                default:
+                    console.warn('[WS] Unknown message type:', type);
+            }
+        }
+        
+        function handleTelemetry(data) {
+            // Thêm vào đầu mảng
+            telemetryData.unshift(data);
+            if (telemetryData.length > MAX_TELEMETRY_ROWS) {
+                telemetryData.pop();
+            }
+            updateTelemetryTable();
+            updateLastUpdate();
+        }
+        
+        function handleGatewayStatus(data) {
+            document.getElementById('deviceId').textContent = data.gateway_id || '-';
+            document.getElementById('uptime').textContent = formatTime(data.uptime_ms || 0);
+            document.getElementById('freeHeap').textContent = formatBytes(data.free_heap || 0);
+            document.getElementById('cpuFreq').textContent = (data.cpu_freq_mhz || 0) + ' MHz';
+            document.getElementById('wifiClients').textContent = data.wifi_clients || 0;
+            document.getElementById('rssi').textContent = (data.rssi || 0) + ' dBm';
+            
+            // SD Card
+            document.getElementById('sdStatus').textContent = data.sd_card_status === 'ok' ? '✅ OK' : '❌ Lỗi';
+            document.getElementById('sdSpace').textContent = (data.sd_free_mb || 0) + ' MB / ' + (data.sd_total_mb || 0) + ' MB';
+            
+            const sdTotal = data.sd_total_mb || 1;
+            const sdUsed = sdTotal - (data.sd_free_mb || 0);
+            const sdPercent = Math.round((sdUsed / sdTotal) * 100);
+            document.getElementById('sdProgress').style.width = (100 - sdPercent) + '%';
+        }
+        
+        function handleAlert(data) {
+            const alertsPanel = document.getElementById('alertsPanel');
+            const alertsList = document.getElementById('alertsList');
+            
+            alertsPanel.style.display = 'block';
+            
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert-item' + (data.severity === 'CRITICAL' ? ' critical' : '');
+            
+            const time = new Date(data.timestamp).toLocaleTimeString('vi-VN');
+            alertDiv.innerHTML = `<strong>[${time}]</strong> ${data.type}: ${data.message}`;
+            
+            alertsList.insertBefore(alertDiv, alertsList.firstChild);
+            
+            // Giới hạn số alerts hiển thị
+            while (alertsList.children.length > 5) {
+                alertsList.removeChild(alertsList.lastChild);
+            }
+        }
+        
+        function updateTelemetryTable() {
+            const tbody = document.getElementById('telemetryBody');
+            tbody.innerHTML = '';
+            
+            if (telemetryData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #666;">Chờ dữ liệu...</td></tr>';
+                return;
+            }
+            
+            telemetryData.forEach(data => {
+                const row = document.createElement('tr');
+                
+                const time = new Date(data.timestamp).toLocaleTimeString('vi-VN');
+                const gps = data.gps ? `${data.gps.lat.toFixed(4)}, ${data.gps.lon.toFixed(4)}` : '-';
+                const tamperStr = data.tamper_flag ? '🔓 HỘPBỊ MỞ' : '🔒 OK';
+                const anomalyClass = data.anomaly_flag ? 'anomaly' : 'normal';
+                const anomalyText = data.anomaly_flag ? 'BẤT THƯỜNG' : 'BÌNH THƯỜNG';
+                
+                row.innerHTML = `
+                    <td>${time}</td>
+                    <td>${data.node_id || '-'}</td>
+                    <td>${data.temperature ? data.temperature.toFixed(1) : '-'}°C</td>
+                    <td>${data.humidity ? data.humidity.toFixed(1) : '-'}%</td>
+                    <td>${data.accel_magnitude ? data.accel_magnitude.toFixed(2) : '-'} g</td>
+                    <td style="font-size: 11px;">${gps}</td>
+                    <td>${tamperStr}</td>
+                    <td><span class="anomaly-flag ${anomalyClass}">${anomalyText}</span></td>
+                    <td>${data.rssi || '-'} dBm / ${data.snr ? data.snr.toFixed(1) : '-'} dB</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        }
+        
+        function updateGPSMap(lat, lon) {
+            const display = document.getElementById('latLonDisplay');
+            if (lat !== undefined && lon !== undefined) {
+                display.textContent = `📍 ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`;
+            }
+        }
+        
+        function updateWSStatus(connected) {
+            const dot = document.getElementById('wsStatus');
+            const text = document.getElementById('wsStatusText');
+            
+            if (connected) {
+                dot.classList.add('connected');
+                text.textContent = '✅ Kết nối';
+            } else {
+                dot.classList.remove('connected');
+                text.textContent = '❌ Mất kết nối';
+            }
+        }
+        
+        function updateLastUpdate() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('vi-VN');
+        }
+        
+        function addDebugLog(message) {
+            const console = document.getElementById('debugConsole');
+            const logDiv = document.createElement('div');
+            
+            const time = new Date().toLocaleTimeString('vi-VN');
+            logDiv.style.color = message.includes('ERROR') ? '#ff3333' : 
+                                message.includes('SUCCESS') ? '#00ff88' : '#888';
+            logDiv.textContent = `[${time}] ${message}`;
+            
+            console.appendChild(logDiv);
+            console.scrollTop = console.scrollHeight;
+            
+            // Giới hạn số dòng log
+            if (console.children.length > 50) {
+                console.removeChild(console.firstChild);
+            }
+        }
+        
+        // ============ Utilities ============
+        function formatTime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+            
+            if (days > 0) return `${days}d ${hours % 24}h`;
+            if (hours > 0) return `${hours}h ${minutes % 60}m`;
+            if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+            return `${seconds}s`;
+        }
+        
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        // ============ Initialization ============
+        document.addEventListener('DOMContentLoaded', function() {
+            addDebugLog('[SYSTEM] Dashboard khởi động...');
+            connectWebSocket();
+            
+            // Update local time
+            setInterval(updateLastUpdate, 1000);
+        });
+        
+        // Handle page visibility
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                console.log('[APP] Tab ẩn đi');
+            } else {
+                console.log('[APP] Tab hiển thị');
+            }
+        });
+    </script>
+</body>
+</html>

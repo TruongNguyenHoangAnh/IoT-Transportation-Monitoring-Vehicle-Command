@@ -1,13 +1,16 @@
 #include "gps.h"
+#include "config.h"
 
-static const int GPS_RX_PIN = 16;
-static const int GPS_TX_PIN = 17;
-static const long GPS_BAUD = 9600;
+static const int GPS_RX_PIN = 16;  
+static const int GPS_TX_PIN = 17;  
+static const long GPS_BAUD = 9600;  // Most GPS modules use 9600, some use 115200
 
 static double gpsLatitude = 0.0;
 static double gpsLongitude = 0.0;
 static bool gpsHasFix = false;
 static String gpsStatusText = "NO_FIX";
+static uint32_t gpsLastDataTime = 0;  // Track when we last received GPS data
+static int gpsDataCount = 0;          // Count valid GPS sentences received
 
 static double parseNmeaCoordinate(const String& field, const String& hemisphere) {
     if (field.length() < 6) {
@@ -48,9 +51,20 @@ static void parseGgaSentence(const String& sentence) {
         return;
     }
 
+    int quality = fields[6].toInt();
+    int satCount = fields[7].toInt();
+    
+    // Log every 30 sentences for debugging
+    static int gpsLogCount = 0;
+    if (++gpsLogCount >= 30) {
+        gpsLogCount = 0;
+        LOG_INFO("[GPS] GGA: Quality=%d, Sats=%d, Lat=%s, Lon=%s", 
+            quality, satCount, fields[2].c_str(), fields[4].c_str());
+    }
+
     gpsLatitude = parseNmeaCoordinate(fields[2], fields[3]);
     gpsLongitude = parseNmeaCoordinate(fields[4], fields[5]);
-    gpsHasFix = fields[6].toInt() > 0;
+    gpsHasFix = quality > 0;
     gpsStatusText = gpsHasFix ? "FIX" : "NO_FIX";
 }
 
@@ -85,6 +99,8 @@ static void parseRmcSentence(const String& sentence) {
 bool initGps() {
     Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
     delay(100);
+    LOG_INFO("[GPS] Initialized on Serial2: RX=GPIO%d TX=GPIO%d @ %ld baud", GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
+    LOG_INFO("[GPS] Waiting for satellite fix (outdoor/window placement required)");
     return true;
 }
 
@@ -92,10 +108,18 @@ void updateGps() {
     while (Serial2.available()) {
         String line = Serial2.readStringUntil('\n');
         line.trim();
-        if (line.startsWith("$GPGGA")) {
-            parseGgaSentence(line);
-        } else if (line.startsWith("$GPRMC")) {
-            parseRmcSentence(line);
+        
+        if (line.length() > 0) {
+            gpsLastDataTime = millis();
+            
+            if (line.startsWith("$GPGGA")) {
+                gpsDataCount++;
+                // Silently parse - will be visible in diagnostic every 30s
+                parseGgaSentence(line);
+            } else if (line.startsWith("$GPRMC")) {
+                // Silently parse
+                parseRmcSentence(line);
+            }
         }
     }
 }
@@ -113,5 +137,21 @@ double getGpsLongitude() {
 }
 
 String getGpsStatus() {
-    return gpsStatusText;
+    // Check if module is even responding
+    if (gpsLastDataTime == 0) {
+        return "NO_DATA";  // GPS module not responding at all
+    }
+    
+    uint32_t now = millis();
+    uint32_t silentTime = now - gpsLastDataTime;
+    
+    if (silentTime > 10000) {
+        return "SILENT";   // No NMEA data for 10+ seconds
+    }
+    
+    if (gpsHasFix) {
+        return "FIX";      // Has satellite fix
+    } else {
+        return "SEARCHING"; // Receiving data but no fix yet
+    }
 }

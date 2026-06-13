@@ -15,12 +15,13 @@
 #include "serial_reader.h"
 #include "json_parser.h"
 #include "crypto_utils.h"
+#include "gps.h"
 #include "mqtt_client.h"
 #include "firestore_client.h"
-#include "gps.h"
 #include "system_state.h"
 #include "wifi_manager.h"
 #include "web_server.h"
+#include "websocket_server.h"
 #include "config_storage.h"
 #include "status_publisher.h"
 #include "tinyml_model.h"
@@ -47,10 +48,10 @@ enum VehicleNodeID {
 VehicleStatsFixed gVehicleStats;
 
 constexpr int WINDOW_SIZE = 12;      // 12 samples per window
-constexpr int CONSISTENCY_WINDOW = 5; // Check last 5 windows for consensus
-constexpr float ANOMALY_THRESHOLD = 0.85f;
-constexpr float NORMAL_THRESHOLD = 0.65f;
-constexpr int CONSENSUS_COUNT = 3;   // Need 3/5 windows to confirm anomaly
+constexpr int CONSISTENCY_WINDOW = 3; // Check last 3 windows for consensus
+constexpr float ANOMALY_THRESHOLD = 0.92f;  // FIX: Raise from 0.85 -> 0.98 (avoid false positives from distribution shift)
+constexpr float NORMAL_THRESHOLD = 0.7f;   // FIX: Raise from 0.65 -> 0.70 (hysteresis range)
+constexpr int CONSENSUS_COUNT = 2;   // FIX: Require 2/3 windows to confirm anomaly (stricter consensus)
 
 struct SensorSample {
     float temp;
@@ -78,10 +79,39 @@ private:
     int buffer_index = 0;
     bool buffer_full = false;
     
-    float window_scores[CONSISTENCY_WINDOW];
+    float window_scores[CONSISTENCY_WINDOW] = {0.0f};
     int score_index = 0;
+    bool warmup_complete = false;  // FIX: Track warmup properly
+    int score_count = 0;           // FIX: Count total scores
     
 public:
+    // ===== Constructor =====
+    SlicingWindowDetector() {
+        reset();
+    }
+
+    // ===== Reset detector state =====
+    void reset() {
+
+        // Clear scores
+        for (int i = 0; i < CONSISTENCY_WINDOW; i++) {
+            window_scores[i] = 0.0f;
+        }
+
+        // Clear sensor buffer
+        for (int i = 0; i < WINDOW_SIZE; i++) {
+            window_buffer[i] = {0,0,0,0};
+        }
+
+        buffer_index = 0;
+        buffer_full = false;
+
+        score_index = 0;
+        score_count = 0;
+
+        warmup_complete = false;
+    }
+
     void addSample(float t, float h, float a) {
         window_buffer[buffer_index] = {t, h, a, (uint32_t)millis()};
         buffer_index = (buffer_index + 1) % WINDOW_SIZE;
@@ -142,6 +172,12 @@ public:
     void updateWindowScore(float score) {
         window_scores[score_index] = score;
         score_index = (score_index + 1) % CONSISTENCY_WINDOW;
+        score_count++;  // FIX: Track total count
+        
+        // FIX: Exit warmup after enough scores collected
+        if (!warmup_complete && score_count >= CONSISTENCY_WINDOW) {
+            warmup_complete = true;
+        }
     }
     
     bool isAnomalyConfirmed() {
@@ -174,18 +210,21 @@ public:
     
     // ===== NEW: Check if detector is ready =====
     bool isReady() {
-        // Wait until buffer is full AND score history has enough samples
-        return buffer_full && (score_index >= CONSISTENCY_WINDOW || window_scores[CONSISTENCY_WINDOW-1] != 0.0f);
+        // FIX: Wait until buffer is full AND warmup complete
+        return buffer_full && warmup_complete;
     }
 };
 
-static SlicingWindowDetector window_detector;
+// Per-node anomaly detectors to isolate multi-node interference
+std::map<int, SlicingWindowDetector> nodeDetectors;
+std::map<int, bool> nodeAnomalyState;
+std::map<int, bool> nodeLastState;
 
 struct StandardScalerESP32 {
 
     float t_mean = 28.8260f;
     float h_mean = 63.2910f;
-    float a_mean =0.7697f;
+    float a_mean = 0.7697f;
 
     float t_std  = 5.7152f;
     float h_std  = 19.7242f;
@@ -283,15 +322,27 @@ void setup() {
     WiFi.persistent(true);
     delay(500); 
     
+    // ========== POWER MANAGEMENT ==========
+    // Reduce CPU frequency to 80 MHz to save power (from 240 MHz default)
+    setCpuFrequencyMhz(80);
+    LOG_INFO("CPU frequency reduced to 80 MHz for power savings");
+    
     WiFiManager::init();
     ConfigStorage::debugDump();
+    
+    // Force update MQTT config from config.h to override old stored values
+    ConfigStorage::setMqttConfig(MQTT_BROKER, String(MQTT_PORT));
+    LOG_INFO("[SETUP] MQTT config updated from config.h: %s:%d", MQTT_BROKER, MQTT_PORT);
+    
     WebServer::init(WIFI_AP_PORT);
+    
+    // WebSocket initialization deferred until WiFi is ready (in loop)
     
     initSerialReader();
     initGps();
-    initMQTT();
+    initMQTT();  // Enable MQTT alongside WebSocket
 
-    LOG_INFO("Setup complete - WiFi AP/STA system ready");
+    LOG_INFO("Setup complete - WebSocket + MQTT enabled");
     
     {
         const tflite::Model* model = tflite::GetModel(model_tflite);
@@ -326,10 +377,77 @@ void loop() {
     WiFiManager::update();
     
     if (WiFiManager::isConnected()) {
-        mqttLoop();
-        updateGps();
-        publishGatewayGpsStatusIfNeeded();
-        publishNodeStatusPing();
+        mqttLoop();  // MQTT connected clients
+    }
+    // Start HTTP and WebSocket servers once WiFi is ready
+    static bool serversInitialized = false;
+    if (!serversInitialized && WiFi.getMode() != WIFI_OFF) {
+        // Wait a moment to ensure network stack is fully initialized
+        static uint32_t lastCheckTime = 0;
+        uint32_t now = millis();
+        
+        if (lastCheckTime == 0) {
+            lastCheckTime = now;
+        } else if (now - lastCheckTime > 2000) {  // Wait 2 seconds after first check
+            WebServer::begin();
+            LOG_INFO("[WebServer] HTTP server started on port %d", WIFI_AP_PORT);
+            
+            AsyncWebServer* httpServer = WebServer::getServer();
+            if (httpServer) {
+                WebSocketManager::init(httpServer, 81);
+                LOG_INFO("[WebSocket] Server initialized on port 81");
+            }
+            
+            serversInitialized = true;
+        }
+    }
+    
+    // Local server maintenance (WebSocket cleanup, vehicle timeouts)
+    // localServerLoop(); // TODO: Will be enabled after migration
+    
+    // GPS and status updates (work in AP mode, no internet needed)
+    updateGps();
+    publishGatewayGpsStatusIfNeeded();
+    publishNodeStatusPing();
+    
+    // GPS diagnostic monitor: log status every 30 seconds to help troubleshoot GPS issues
+    static uint32_t lastGpsDiagnosticTime = 0;
+    uint32_t now = millis();
+    if (now - lastGpsDiagnosticTime > 30000) {
+        lastGpsDiagnosticTime = now;
+        String gpsStatus = getGpsStatus();
+        if (gpsStatus == "NO_DATA") {
+            LOG_WARN("[GPS DIAG] NO DATA - Module may not be connected. Check Serial2 pins (RX/TX on GPIO16/17)");
+        } else if (gpsStatus == "SILENT") {
+            LOG_WARN("[GPS DIAG] SILENT - Module not responding. Check baud rate (9600) or connection");
+        } else if (gpsStatus == "SEARCHING") {
+            static uint32_t searchStartTime = 0;
+            if (searchStartTime == 0) searchStartTime = now;
+            uint32_t searchDurationSec = (now - searchStartTime) / 1000;
+            LOG_INFO("[GPS DIAG] SEARCHING for satellites (%u sec elapsed)...", searchDurationSec);
+            if (searchDurationSec > 120) {
+                LOG_ERROR("[GPS DIAG] No fix after 2+ minutes! Check GPS antenna, positioning, or hardware");
+            }
+        } else if (gpsStatus == "FIX") {
+            LOG_INFO("[GPS DIAG] FIX OK - Lat: %.5f, Lon: %.5f", getGpsLatitude(), getGpsLongitude());
+        }
+    }
+    
+    // Broadcast gateway status via WebSocket every 10 seconds
+    static uint32_t lastWebSocketStatusBroadcast = 0;
+    if (now - lastWebSocketStatusBroadcast > 10000) {
+        StaticJsonDocument<256> statusDoc;
+        statusDoc["gateway_id"] = ConfigStorage::getDeviceID();
+        statusDoc["uptime_ms"] = now;
+        statusDoc["free_heap"] = ESP.getFreeHeap();
+        statusDoc["rssi"] = WiFi.RSSI();
+        statusDoc["wifi_clients"] = WiFi.softAPgetStationNum();
+        
+        String statusJson;
+        serializeJson(statusDoc, statusJson);
+        WebSocketManager::broadcastGatewayStatus(statusJson);
+        
+        lastWebSocketStatusBroadcast = now;
     }
     
     blinkLED();
@@ -354,8 +472,8 @@ float runTinyML(float temp, float humi, float accel)
         init = true;
     } else {
         // Smooth temp & humidity (slow-changing)
-        t_raw = 0.9f * t_raw + 0.1f * temp;
-        h_raw = 0.9f * h_raw + 0.1f * humi;
+        t_raw = temp;
+        h_raw = humi;
         // CRITICAL FIX: Don't smooth accel - preserve spikes for anomaly detection
         a_raw = accel;
     }
@@ -469,7 +587,7 @@ void handleSerialData() {
     if (!verifySignedJson(rxPacket.payload, unsignedJson)) {
         LOG_ERROR("HMAC verification failed for RX payload");
         int node_id = rxPacket.node_id;
-        if (node_id > 0 && node_id < MAX_VEHICLES) {
+        if (node_id > 0) {
             gVehicleStats.getStats(node_id).rejectedCount += 1;
         }
         return;
@@ -480,7 +598,7 @@ void handleSerialData() {
     if (!validateRXPacket(rxPacket)) {
         LOG_ERROR("RX packet validation failed");
         int node_id = rxPacket.node_id;
-        if (node_id > 0 && node_id < MAX_VEHICLES) {
+        if (node_id > 0) {
             gVehicleStats.getStats(node_id).rejectedCount += 1;
         }
         return;
@@ -494,7 +612,7 @@ void handleSerialData() {
     if (parseHeartbeat(rxPacket.payload, dummy_id)) {
         LOG_INFO("Heartbeat received from: %s", rxPacket.payload.c_str());
         int node_id = rxPacket.node_id;
-        if (node_id > 0 && node_id < MAX_VEHICLES) {
+        if (node_id > 0) {
             gVehicleStats.getStats(node_id).packetCount += 1;
             gVehicleStats.getStats(node_id).totalCount += 1;
         }
@@ -506,7 +624,7 @@ void handleSerialData() {
     if (!parseJSONPayload(rxPacket.payload, telemetry)) {
         LOG_ERROR("JSON parse failed");
         int node_id = rxPacket.node_id;
-        if (node_id > 0 && node_id < MAX_VEHICLES) {
+        if (node_id > 0) {
             gVehicleStats.getStats(node_id).rejectedCount += 1;
         }
         return;
@@ -515,12 +633,17 @@ void handleSerialData() {
     enrichTelemetryData(telemetry, rxPacket.rssi, rxPacket.snr,
                       rxPacket.sequence, rxPacket.received_at_ms);
 
+    // Extract node_id for per-node detector tracking
+    int node_id = rxPacket.node_id;
+
 // ===== ADD SAMPLE TO WINDOW FIRST =====
-window_detector.addSample(
-    telemetry.temperature,
-    telemetry.humidity,
-    telemetry.accel_magnitude
-);
+if (node_id > 0) {
+    nodeDetectors[node_id].addSample(
+        telemetry.temperature,
+        telemetry.humidity,
+        telemetry.accel_magnitude
+    );
+}
 
 // ===== ALWAYS RUN NN (even during warm-up) =====
 float anomaly_score = runTinyML(
@@ -531,32 +654,88 @@ float anomaly_score = runTinyML(
 
 telemetry.nn_anomaly_score = anomaly_score;
 
-// Update window score history
-window_detector.updateWindowScore(anomaly_score);
+// Update window score history (per-node)
+if (node_id > 0) {
+    nodeDetectors[node_id].updateWindowScore(anomaly_score);
+}
 
 // ===== CHECK IF READY (after updating score) =====
-bool ready = window_detector.isReady();
+bool ready = (node_id > 0) ? nodeDetectors[node_id].isReady() : false;
 
 if (!ready) {
-    // Warm-up phase: publish but don't apply consensus yet
-    int node_id = rxPacket.node_id;
-    if (node_id > 0 && node_id < MAX_VEHICLES) {
+
+    telemetry.anomaly_flag = 0;
+    telemetry.nn_anomaly_state = "WARMUP";
+
+    LOG_INFO("[Window] Warming up... score=%.3f", anomaly_score);
+
+    // ===== WEBSOCKET BROADCAST EVEN DURING WARMUP =====
+    StaticJsonDocument<512> wsTelemDoc;
+
+    wsTelemDoc["type"] = "telemetry";
+    wsTelemDoc["vehicle_id"] = telemetry.vehicle_id;
+    wsTelemDoc["timestamp_ms"] = telemetry.timestamp_ms;
+
+    wsTelemDoc["temperature"] = telemetry.temperature;
+    wsTelemDoc["humidity"] = telemetry.humidity;
+    wsTelemDoc["accel_magnitude"] = telemetry.accel_magnitude;
+
+    wsTelemDoc["nn_anomaly_score"] = telemetry.nn_anomaly_score;
+    wsTelemDoc["nn_anomaly_state"] = telemetry.nn_anomaly_state;
+
+    wsTelemDoc["rssi"] = telemetry.rssi;
+    wsTelemDoc["snr"] = telemetry.snr;
+
+    String wsTelemJson;
+    serializeJson(wsTelemDoc, wsTelemJson);
+
+    WebSocketManager::broadcastTelemetry(wsTelemJson);
+
+    if (node_id > 0) {
         gVehicleStats.getStats(node_id).packetCount += 1;
         gVehicleStats.getStats(node_id).totalCount += 1;
         gVehicleStats.getStats(node_id).lastTelemetry = now;
     }
     LOG_INFO("[Window] Warming up... score=%.3f (buffering sample)", anomaly_score);
     publishTelemetry(telemetry);
+
     return;
 }
 
 // ===== WINDOW-BASED DECISION (only when ready) =====
-static bool is_anomaly = false;
-static bool last_state = false;
+// Initialize per-node state if first time
+if (nodeAnomalyState.find(node_id) == nodeAnomalyState.end()) {
+    nodeAnomalyState[node_id] = false;
+    nodeLastState[node_id] = false;
+}
+
+bool& is_anomaly = nodeAnomalyState[node_id];
+bool& last_state = nodeLastState[node_id];
 
 // Check if anomaly is confirmed (3/5 windows above threshold)
-bool anomaly_confirmed = window_detector.isAnomalyConfirmed();
-bool normal_confirmed = window_detector.isNormalConfirmed();
+WindowFeatures feat =
+    nodeDetectors[node_id].extractWindowFeatures();
+
+bool rapid_temp_rise =
+    feat.delta_temp > 8.0f;
+
+bool strong_vibration =
+    feat.max_accel_spike > 1.2f;
+
+bool ml_consensus =
+    (node_id > 0) ?
+    nodeDetectors[node_id].isAnomalyConfirmed() :
+    false;
+
+bool feature_anomaly =
+    rapid_temp_rise || strong_vibration;
+
+bool anomaly_confirmed = ml_consensus || feature_anomaly;
+
+bool normal_confirmed =
+    (node_id > 0) ?
+    nodeDetectors[node_id].isNormalConfirmed() :
+    false;
 
 // ===== SIMPLE HYSTERESIS WITH WINDOW CONSENSUS =====
 if (anomaly_confirmed) {
@@ -589,10 +768,77 @@ LOG_INFO("[NN-Anomaly-Window] score=%.3f state=%s flag=%d (window_based_decision
          telemetry.nn_anomaly_state.c_str(),
          telemetry.anomaly_flag);
 
-    publishTelemetry(telemetry);
+    // ============ WebSocket Real-Time Telemetry Broadcast ============
+    {
+        StaticJsonDocument<512> wsTelemDoc;
+        wsTelemDoc["type"] = "telemetry";
+        wsTelemDoc["vehicle_id"] = telemetry.vehicle_id;
+        wsTelemDoc["timestamp_ms"] = telemetry.timestamp_ms;
+        wsTelemDoc["gps_latitude"] = telemetry.gps_latitude;
+        wsTelemDoc["gps_longitude"] = telemetry.gps_longitude;
+        wsTelemDoc["temperature"] = telemetry.temperature;
+        wsTelemDoc["humidity"] = telemetry.humidity;
+        wsTelemDoc["accel_magnitude"] = telemetry.accel_magnitude;
+        wsTelemDoc["light_level"] = telemetry.light_level;
+        wsTelemDoc["anomaly_flag"] = telemetry.anomaly_flag;
+        wsTelemDoc["nn_anomaly_state"] = telemetry.nn_anomaly_state;
+        wsTelemDoc["nn_anomaly_score"] = telemetry.nn_anomaly_score;
+        wsTelemDoc["rssi"] = telemetry.rssi;
+        wsTelemDoc["snr"] = telemetry.snr;
+        wsTelemDoc["tamper_flag"] = telemetry.tamper_flag;
+        
+        String wsTelemJson;
+        serializeJson(wsTelemDoc, wsTelemJson);
+        WebSocketManager::broadcastTelemetry(wsTelemJson);
+        
+        LOG_DEBUG("[WebSocket-Telem] Broadcast to dashboard: vehicle=%s, anomaly=%s, score=%.3f",
+                  telemetry.vehicle_id.c_str(), telemetry.nn_anomaly_state.c_str(), telemetry.nn_anomaly_score);
+    }
+    
+    // ============ MQTT Telemetry Publish (parallel with WebSocket) ============
+    if (WiFiManager::isConnected()) {
+        publishTelemetry(telemetry);  // Send to MQTT broker simultaneously
+        LOG_DEBUG("[MQTT-Telem] Published: vehicle=%s, score=%.3f",
+                  telemetry.vehicle_id.c_str(), telemetry.nn_anomaly_score);
+    }
+    
+    // ============ Handle Tamper Alerts (Tamper Flag) ============
+    if (telemetry.tamper_flag != 0) {
+        StaticJsonDocument<128> tamperAlertDoc;
+        tamperAlertDoc["type"] = "tamper_alert";
+        tamperAlertDoc["vehicle_id"] = telemetry.vehicle_id;
+        tamperAlertDoc["timestamp_ms"] = telemetry.timestamp_ms;
+        tamperAlertDoc["alert_reason"] = "Tamper Detected";
+        
+        String tamperJson;
+        serializeJson(tamperAlertDoc, tamperJson);
+        WebSocketManager::broadcastAlert(tamperJson);
+        
+        LOG_WARN("[TAMPER-ALERT] Vehicle %s: Tamper flag=%d detected", 
+                 telemetry.vehicle_id.c_str(), telemetry.tamper_flag);
+    }
+    
+    // ============ Handle Anomaly Alerts (NN Detection) ============
+    if (is_anomaly && telemetry.anomaly_flag == 1) {
+        StaticJsonDocument<256> anomalyAlertDoc;
+        anomalyAlertDoc["type"] = "anomaly_alert";
+        anomalyAlertDoc["vehicle_id"] = telemetry.vehicle_id;
+        anomalyAlertDoc["timestamp_ms"] = telemetry.timestamp_ms;
+        anomalyAlertDoc["alert_reason"] = "NN Anomaly Detected";
+        anomalyAlertDoc["nn_anomaly_score"] = telemetry.nn_anomaly_score;
+        anomalyAlertDoc["gps_latitude"] = telemetry.gps_latitude;
+        anomalyAlertDoc["gps_longitude"] = telemetry.gps_longitude;
+        anomalyAlertDoc["temperature"] = telemetry.temperature;
+        
+        String anomalyAlertJson;
+        serializeJson(anomalyAlertDoc, anomalyAlertJson);
+        WebSocketManager::broadcastAlert(anomalyAlertJson);
+        
+        LOG_WARN("[ANOMALY-BROADCAST] Vehicle %s: Score %.3f sent to Dashboard", 
+                 telemetry.vehicle_id.c_str(), telemetry.nn_anomaly_score);
+    }
 
-    int node_id = rxPacket.node_id;
-    if (node_id > 0 && node_id < MAX_VEHICLES) {
+    if (node_id > 0) {
         gVehicleStats.getStats(node_id).packetCount += 1;
         gVehicleStats.getStats(node_id).totalCount += 1;
         gVehicleStats.getStats(node_id).lastTelemetry = now;

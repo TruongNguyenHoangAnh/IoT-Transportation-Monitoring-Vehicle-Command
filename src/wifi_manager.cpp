@@ -3,6 +3,9 @@
 #include "web_server.h"
 #include "config.h"
 #include <ArduinoJson.h>
+#include "esp_wifi.h"  // For WiFi power management (modem sleep)
+#include <time.h>      // For NTP time sync
+#include <ESPmDNS.h>   // For mDNS (Bonjour) service discovery
 
 ESPState WiFiManager::currentState = STATE_BOOT;
 uint32_t WiFiManager::apStartTime = 0;
@@ -172,11 +175,15 @@ void WiFiManager::transitionToSTA() {
     WiFi.mode(WIFI_STA);
     delay(500);  // CRITICAL: WiFi stack needs substantial time after mode switch
     
-    // IMPORTANT: WiFi settings MUST be called AFTER mode switch, BEFORE WiFi.begin()
-    WiFi.setSleep(false);           // Disable sleep to prevent MQTT drops
-    WiFi.setAutoReconnect(true);    // Auto-reconnect on disconnection
-    WiFi.persistent(false);         // DON'T use NVS storage (use ConfigStorage instead)
-    WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Good signal strength
+    WiFi.setAutoReconnect(true);    
+    WiFi.persistent(false);         
+    
+    WiFi.setTxPower(WIFI_POWER_11dBm);     // Balance: 11 dBm (~110 mA peak)
+    
+    // Enable WiFi modem sleep for additional power savings during idle periods
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);    // Minimal WiFi modem sleep (keeps connection)
+    
+    LOG_INFO("[WiFiMgr] TX Power 11 dBm + modem sleep enabled (power-optimized)");
     
     String ssid = ConfigStorage::getWiFiSSID();
     String password = ConfigStorage::getWiFiPassword();
@@ -206,6 +213,34 @@ void WiFiManager::transitionToRunning() {
         WiFi.localIP().toString().c_str(),
         WiFi.SSID().c_str(),
         WiFi.RSSI());
+    
+    // Initialize mDNS for service discovery (allows access via hostname)
+    const char* mdnsHostname = "rx-gateway";
+    if (MDNS.begin(mdnsHostname)) {
+        MDNS.addService("http", "tcp", 80);
+        MDNS.addServiceTxt("http", "tcp", "device", "RX-Gateway");
+        LOG_INFO("[WiFiMgr] mDNS started: http://%s.local", mdnsHostname);
+    } else {
+        LOG_WARN("[WiFiMgr] mDNS initialization failed");
+    }
+    
+    // Sync system time via NTP (required for TLS certificate verification)
+    LOG_INFO("[WiFiMgr] Syncing system time via NTP...");
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+    
+    // Wait max 10 seconds for time sync
+    time_t now = time(nullptr);
+    int timeoutCount = 0;
+    while (now < 24 * 3600 && timeoutCount < 100) {
+        delay(100);
+        now = time(nullptr);
+        timeoutCount++;
+    }
+    
+    struct tm timeinfo = *localtime(&now);
+    LOG_INFO("[WiFiMgr] System time synced: %04d-%02d-%02d %02d:%02d:%02d",
+        timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+        timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
 }
 
 void WiFiManager::startAPMode() {
